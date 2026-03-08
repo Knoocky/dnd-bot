@@ -1,0 +1,38 @@
+﻿[
+  {
+    "key": "человек",
+    "label": "Человек",
+    "description": "Универсальная раса, +1 ко всем характеристикам",
+    "bonuses": {"all": 1}
+  },
+  {
+    "key": "эльф",
+    "label": "Эльф",
+    "description": "+2 Ловкость, +1 Интеллект",
+    "bonuses": {"dexterity": 2, "intelligence": 1}
+  },
+  {
+    "key": "гном",
+    "label": "Гном",
+    "description": "+2 Телосложение, +1 Мудрость",
+    "bonuses": {"constitution": 2, "wisdom": 1}
+  },
+  {
+    "key": "полурослик",
+    "label": "Полурослик",
+    "description": "+2 Ловкость, +1 Харизма",
+    "bonuses": {"dexterity": 2, "charisma": 1}
+  },
+  {
+    "key": "дварф",
+    "label": "Дварф",
+    "description": "+2 Телосложение, +1 Сила",
+    "bonuses": {"constitution": 2, "strength": 1}
+  },
+  {
+    "key": "тифлинг",
+    "label": "Тифлинг",
+    "description": "+2 Харизма, +1 Интеллект",
+    "bonuses": {"charisma": 2, "intelligence": 1}
+  }
+]

@@ -1,0 +1,44 @@
+﻿[
+  {
+    "key": "воин",
+    "label": "Воин",
+    "description": "Мастер боя, высокое HP",
+    "base_hp": 12,
+    "primary_stat": "strength"
+  },
+  {
+    "key": "маг",
+    "label": "Маг",
+    "description": "Мощная магия, слабая броня",
+    "base_hp": 6,
+    "primary_stat": "intelligence"
+  },
+  {
+    "key": "плут",
+    "label": "Плут",
+    "description": "Скрытность и хитрость",
+    "base_hp": 8,
+    "primary_stat": "dexterity"
+  },
+  {
+    "key": "жрец",
+    "label": "Жрец",
+    "description": "Лечение и защитная магия",
+    "base_hp": 8,
+    "primary_stat": "wisdom"
+  },
+  {
+    "key": "следопыт",
+    "label": "Следопыт",
+    "description": "Лук, выживание, зверь-компаньон",
+    "base_hp": 10,
+    "primary_stat": "dexterity"
+  },
+  {
+    "key": "бард",
+    "label": "Бард",
+    "description": "Магия слова, поддержка союзников",
+    "base_hp": 8,
+    "primary_stat": "charisma"
+  }
+]

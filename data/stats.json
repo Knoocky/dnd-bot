@@ -1,0 +1,8 @@
+﻿[
+  {"key": "strength", "label": "Сила", "order": 1},
+  {"key": "dexterity", "label": "Ловкость", "order": 2},
+  {"key": "constitution", "label": "Телосложение", "order": 3},
+  {"key": "intelligence", "label": "Интеллект", "order": 4},
+  {"key": "wisdom", "label": "Мудрость", "order": 5},
+  {"key": "charisma", "label": "Харизма", "order": 6}
+]
