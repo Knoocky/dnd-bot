@@ -8,7 +8,7 @@ class InventoryCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.command(name="инвентарь", aliases=["inv", "сумка", "ин", "с"])
+    @commands.command(name="инвентарь", aliases=["сумка", "ин", "с"])
     async def show_inventory(self, ctx):
         campaign = db.get_active_campaign(str(ctx.channel.id))
         if not campaign:
@@ -31,7 +31,7 @@ class InventoryCog(commands.Cog):
         embed.add_field(name="💰 Золото", value=str(char["gold"]))
         await ctx.send(embed=embed)
 
-    @commands.command(name="взять", aliases=["добавить_предмет", "loot", "вз"])
+    @commands.command(name="взять", aliases=["добавить_предмет", "вз"])
     async def add_item(self, ctx, *, item: str):
         campaign = db.get_active_campaign(str(ctx.channel.id))
         if not campaign:
@@ -53,7 +53,7 @@ class InventoryCog(commands.Cog):
         db.update_character(str(ctx.author.id), campaign["id"], {"inventory": inventory})
         await ctx.send(f"✅ **{char['name']}** подбирает: *{item}*")
 
-    @commands.command(name="выбросить", aliases=["drop", "убрать", "вб"])
+    @commands.command(name="выбросить", aliases=["убрать", "вб"])
     async def drop_item(self, ctx, *, item: str):
         campaign = db.get_active_campaign(str(ctx.channel.id))
         if not campaign:
@@ -76,7 +76,7 @@ class InventoryCog(commands.Cog):
         db.update_character(str(ctx.author.id), campaign["id"], {"inventory": inventory})
         await ctx.send(f"🗑️ **{char['name']}** выбрасывает: *{found}*")
 
-    @commands.command(name="золото", aliases=["gold", "монеты", "зл"])
+    @commands.command(name="золото", aliases=["монеты", "зл"])
     async def manage_gold(self, ctx, action: str = "показать", amount: int = 0):
         campaign = db.get_active_campaign(str(ctx.channel.id))
         if not campaign:
@@ -88,13 +88,13 @@ class InventoryCog(commands.Cog):
             await ctx.send("❌ У тебя нет персонажа.")
             return
 
-        if action in ("показать", "show"):
+        if action == "показать":
             await ctx.send(f"💰 **{char['name']}** имеет **{char['gold']}** золотых монет.")
-        elif action in ("дать", "add", "+"):
+        elif action in ("дать", "+"):
             new_gold = char["gold"] + abs(amount)
             db.update_character(str(ctx.author.id), campaign["id"], {"gold": new_gold})
             await ctx.send(f"💰 +{abs(amount)} монет! У **{char['name']}** теперь **{new_gold}** золота.")
-        elif action in ("взять", "spend", "-"):
+        elif action in ("взять", "-"):
             if char["gold"] < amount:
                 await ctx.send(
                     f"❌ Недостаточно золота! У **{char['name']}** есть только **{char['gold']}** монет."

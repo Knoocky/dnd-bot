@@ -1,44 +1,575 @@
 ﻿[
   {
-    "key": "воин",
-    "label": "Воин",
-    "description": "Мастер боя, высокое HP",
+    "key": "artificer",
+    "label": "Изобретатель",
+    "aliases": ["артифисер", "изобретатель"],
+    "description": "Изобретатель, сочетающий магию и ремесло.",
+    "source": "Eberron: Forge of the Artificer",
+    "base_hp": 8,
+    "primary_stat": "intelligence",
+    "subclass_level": 3,
+    "subclasses": [
+      {
+        "key": "alchemist",
+        "label": "Алхимик",
+        "aliases": ["алхимик"],
+        "description": "Алхимические эликсиры, реактивы и поддержка.",
+        "source": "Eberron: Forge of the Artificer"
+      },
+      {
+        "key": "armorer",
+        "label": "Бронник",
+        "aliases": ["бронник"],
+        "description": "Арканная броня и смена боевых ролей.",
+        "source": "Eberron: Forge of the Artificer"
+      },
+      {
+        "key": "artillerist",
+        "label": "Артиллерист",
+        "aliases": ["артиллерист"],
+        "description": "Арканная артиллерия, пушки и турели.",
+        "source": "Eberron: Forge of the Artificer"
+      },
+      {
+        "key": "battle-smith",
+        "label": "Боевой кузнец",
+        "aliases": ["боевой кузнец"],
+        "description": "Боевой инженер и механический компаньон.",
+        "source": "Eberron: Forge of the Artificer"
+      },
+      {
+        "key": "cartographer",
+        "label": "Картограф",
+        "aliases": ["картограф"],
+        "description": "Навигация, разведка и картографическая магия.",
+        "source": "Eberron: Forge of the Artificer"
+      }
+    ]
+  },
+  {
+    "key": "barbarian",
+    "label": "Варвар",
+    "aliases": ["варвар"],
+    "description": "Яростный боец с высоким запасом здоровья.",
+    "source": "PHB 2024",
     "base_hp": 12,
-    "primary_stat": "strength"
+    "primary_stat": "strength",
+    "subclass_level": 3,
+    "subclasses": [
+      {
+        "key": "berserker",
+        "label": "Берсерк",
+        "aliases": ["берсерк"],
+        "description": "Ярость как чистая разрушительная сила.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "wild-heart",
+        "label": "Дикое сердце",
+        "aliases": ["дикое сердце"],
+        "description": "Духовная связь со звериными архетипами.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "giant",
+        "label": "Путь гиганта",
+        "aliases": ["путь гиганта"],
+        "description": "Гигантская мощь, рост и сокрушительные броски.",
+        "source": "Bigby Presents: Glory of the Giants"
+      }
+    ]
   },
   {
-    "key": "маг",
-    "label": "Маг",
-    "description": "Мощная магия, слабая броня",
-    "base_hp": 6,
-    "primary_stat": "intelligence"
-  },
-  {
-    "key": "плут",
-    "label": "Плут",
-    "description": "Скрытность и хитрость",
-    "base_hp": 8,
-    "primary_stat": "dexterity"
-  },
-  {
-    "key": "жрец",
-    "label": "Жрец",
-    "description": "Лечение и защитная магия",
-    "base_hp": 8,
-    "primary_stat": "wisdom"
-  },
-  {
-    "key": "следопыт",
-    "label": "Следопыт",
-    "description": "Лук, выживание, зверь-компаньон",
-    "base_hp": 10,
-    "primary_stat": "dexterity"
-  },
-  {
-    "key": "бард",
+    "key": "bard",
     "label": "Бард",
-    "description": "Магия слова, поддержка союзников",
+    "aliases": ["бард"],
+    "description": "Заклинатель слова, музыки и историй.",
+    "source": "PHB 2024",
     "base_hp": 8,
-    "primary_stat": "charisma"
+    "primary_stat": "charisma",
+    "subclass_level": 3,
+    "subclasses": [
+      {
+        "key": "lore",
+        "label": "Коллегия знаний",
+        "aliases": ["коллегия знаний"],
+        "description": "Эрудиты, собирающие тайны и магию.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "moon",
+        "label": "Колледж луны",
+        "aliases": ["колледж луны"],
+        "description": "Лунная магия и мифология Реалмов.",
+        "source": "Forgotten Realms: Heroes of Faerûn"
+      }
+    ]
+  },
+  {
+    "key": "cleric",
+    "label": "Жрец",
+    "aliases": ["жрец", "клирик"],
+    "description": "Божественный заклинатель поддержки, света и кары.",
+    "source": "PHB 2024",
+    "base_hp": 8,
+    "primary_stat": "wisdom",
+    "subclass_level": 3,
+    "subclasses": [
+      {
+        "key": "life",
+        "label": "Домен жизни",
+        "aliases": ["домен жизни"],
+        "description": "Исцеление, защита и поддержка жизни.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "light",
+        "label": "Домен света",
+        "aliases": ["домен света"],
+        "description": "Свет, солнце и очищающий огонь.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "trickery",
+        "label": "Домен хитрости",
+        "aliases": ["домен хитрости"],
+        "description": "Обман, тени и озорные божественные уловки.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "war",
+        "label": "Домен войны",
+        "aliases": ["домен войны"],
+        "description": "Боевой жрец и божественный воин.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "knowledge",
+        "label": "Домен знания",
+        "aliases": ["домен знания"],
+        "description": "Тайны, знание и накопленная мудрость.",
+        "source": "PHB 2014",
+        "legacy": true
+      },
+      {
+        "key": "death",
+        "label": "Домен смерти",
+        "aliases": ["домен смерти"],
+        "description": "Злодейский домен смерти и некромантии.",
+        "source": "DMG 2014",
+        "legacy": true,
+        "requires_dm_approval": true
+      }
+    ]
+  },
+  {
+    "key": "druid",
+    "label": "Друид",
+    "aliases": ["друид"],
+    "description": "Хранитель природы, циклов и стихий.",
+    "source": "PHB 2024",
+    "base_hp": 8,
+    "primary_stat": "wisdom",
+    "subclass_level": 3,
+    "subclasses": [
+      {
+        "key": "land",
+        "label": "Круг земли",
+        "aliases": ["круг земли"],
+        "description": "Хранители природных ландшафтов и традиций.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "moon",
+        "label": "Круг луны",
+        "aliases": ["круг луны"],
+        "description": "Мастера дикой формы и звериного облика.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "sea",
+        "label": "Круг моря",
+        "aliases": ["круг моря"],
+        "description": "Море, штормы и приливы как источник силы.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "stars",
+        "label": "Круг звёзд",
+        "aliases": ["круг звёзд", "круг звезд"],
+        "description": "Созвездия и небесные формы друидской магии.",
+        "source": "PHB 2024"
+      }
+    ]
+  },
+  {
+    "key": "fighter",
+    "label": "Воин",
+    "aliases": ["воин", "боец"],
+    "description": "Универсальный мастер оружия и тактики.",
+    "source": "PHB 2024",
+    "base_hp": 10,
+    "primary_stat": "strength",
+    "subclass_level": 3,
+    "subclasses": [
+      {
+        "key": "battle-master",
+        "label": "Мастер боя",
+        "aliases": ["мастер боя"],
+        "description": "Тактические манёвры и контроль поля боя.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "champion",
+        "label": "Чемпион",
+        "aliases": ["чемпион"],
+        "description": "Чистая боевая эффективность без лишней сложности.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "eldritch-knight",
+        "label": "Мистический рыцарь",
+        "aliases": ["мистический рыцарь"],
+        "description": "Воин, совмещающий оружие и боевые чары.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "psi-warrior",
+        "label": "Пси-воин",
+        "aliases": ["пси-воин"],
+        "description": "Псайонические техники и ментальная мощь.",
+        "source": "PHB 2024"
+      }
+    ]
+  },
+  {
+    "key": "monk",
+    "label": "Монах",
+    "aliases": ["монах"],
+    "description": "Мастер дисциплины тела, духа и боевых искусств.",
+    "source": "PHB 2024",
+    "base_hp": 8,
+    "primary_stat": "dexterity",
+    "subclass_level": 3,
+    "subclasses": [
+      {
+        "key": "open-hand",
+        "label": "Воин открытой ладони",
+        "aliases": ["воин открытой ладони"],
+        "description": "Классический мастер боевых искусств и контроля.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "shadow",
+        "label": "Воин тени",
+        "aliases": ["воин тени"],
+        "description": "Скрытность, тьма и внезапные удары.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "elements",
+        "label": "Воин стихий",
+        "aliases": ["воин стихий"],
+        "description": "Стихийные техники, вплетённые в боевые искусства.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "mercy",
+        "label": "Воин милосердия",
+        "aliases": ["воин милосердия"],
+        "description": "Исцеление и причинение страдания в одном пути.",
+        "source": "PHB 2024"
+      }
+    ]
+  },
+  {
+    "key": "paladin",
+    "label": "Паладин",
+    "aliases": ["паладин"],
+    "description": "Священный воин клятв, веры и возмездия.",
+    "source": "PHB 2024",
+    "base_hp": 10,
+    "primary_stat": "strength",
+    "subclass_level": 3,
+    "subclasses": [
+      {
+        "key": "devotion",
+        "label": "Клятва преданности",
+        "aliases": ["клятва преданности"],
+        "description": "Идеализм, честь и светлое служение.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "ancients",
+        "label": "Клятва древних",
+        "aliases": ["клятва древних"],
+        "description": "Природа, древний свет и защита жизни.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "vengeance",
+        "label": "Клятва возмездия",
+        "aliases": ["клятва возмездия"],
+        "description": "Безжалостная охота на зло.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "glory",
+        "label": "Клятва славы",
+        "aliases": ["клятва славы"],
+        "description": "Героизм, подвиги и легендарная слава.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "noble-genies",
+        "label": "Клятва благородных джиннов",
+        "aliases": ["клятва благородных джиннов"],
+        "description": "Клятва, связанная с благородными джиннами.",
+        "source": "Forgotten Realms: Heroes of Faerûn"
+      },
+      {
+        "key": "oathbreaker",
+        "label": "Клятвопреступник",
+        "aliases": ["клятвопреступник"],
+        "description": "Паладин-отступник и злодейская опция.",
+        "source": "DMG 2014",
+        "legacy": true,
+        "requires_dm_approval": true
+      }
+    ]
+  },
+  {
+    "key": "ranger",
+    "label": "Следопыт",
+    "aliases": ["следопыт"],
+    "description": "Охотник, разведчик и мастер выживания.",
+    "source": "PHB 2024",
+    "base_hp": 10,
+    "primary_stat": "dexterity",
+    "subclass_level": 3,
+    "subclasses": [
+      {
+        "key": "beast-master",
+        "label": "Повелитель зверя",
+        "aliases": ["повелитель зверя", "мастер зверя"],
+        "description": "Следопыт со зверем-компаньоном.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "fey-wanderer",
+        "label": "Странник фей",
+        "aliases": ["странник фей"],
+        "description": "Отмеченный силой Фейвальда странник.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "gloom-stalker",
+        "label": "Мрачный охотник",
+        "aliases": ["мрачный охотник"],
+        "description": "Хищник тьмы, засад и подземелий.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "hunter",
+        "label": "Охотник",
+        "aliases": ["охотник"],
+        "description": "Универсальный охотник на чудовищ и угрозы дикой местности.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "winter-walker",
+        "label": "Зимний странник",
+        "aliases": ["зимний странник"],
+        "description": "Следопыт суровых северных земель.",
+        "source": "Forgotten Realms: Heroes of Faerûn"
+      }
+    ]
+  },
+  {
+    "key": "rogue",
+    "label": "Плут",
+    "aliases": ["плут", "вор"],
+    "description": "Скрытный мастер хитрости, ловкости и точных ударов.",
+    "source": "PHB 2024",
+    "base_hp": 8,
+    "primary_stat": "dexterity",
+    "subclass_level": 3,
+    "subclasses": [
+      {
+        "key": "scion-of-the-three",
+        "label": "Наследник троих",
+        "aliases": ["наследник троих"],
+        "description": "Плут, связанный с мистической троицей Фаэруна.",
+        "source": "Forgotten Realms: Heroes of Faerûn"
+      }
+    ]
+  },
+  {
+    "key": "sorcerer",
+    "label": "Чародей",
+    "aliases": ["чародей", "сорсерер"],
+    "description": "Врождённая магия, текущая прямо из крови и души.",
+    "source": "PHB 2024",
+    "base_hp": 6,
+    "primary_stat": "charisma",
+    "subclass_level": 3,
+    "subclasses": [
+      {
+        "key": "aberrant",
+        "label": "Аберрантное колдовство",
+        "aliases": ["аберрантное колдовство"],
+        "description": "Психические и иноймировые влияния на магию.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "clockwork",
+        "label": "Часовое колдовство",
+        "aliases": ["часовое колдовство"],
+        "description": "Магия порядка, механики и космической регуляции.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "draconic",
+        "label": "Драконье колдовство",
+        "aliases": ["драконье колдовство"],
+        "description": "Драконья кровь как источник силы.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "wild-magic",
+        "label": "Дикое колдовство",
+        "aliases": ["дикое колдовство"],
+        "description": "Хаотическая магия с непредсказуемыми всплесками.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "spellfire",
+        "label": "Спеллфайр",
+        "aliases": ["спеллфайр"],
+        "description": "Колдовство, связанное со Спэллфаером Реалмов.",
+        "source": "Forgotten Realms: Heroes of Faerûn"
+      }
+    ]
+  },
+  {
+    "key": "warlock",
+    "label": "Колдун",
+    "aliases": ["колдун", "варлок"],
+    "description": "Заклинатель, связанный договором с могущественным покровителем.",
+    "source": "PHB 2024",
+    "base_hp": 8,
+    "primary_stat": "charisma",
+    "subclass_level": 3,
+    "subclasses": [
+      {
+        "key": "archfey",
+        "label": "Архифей",
+        "aliases": ["архифей"],
+        "description": "Покровитель из Фейвальда и странной магии.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "celestial",
+        "label": "Небесный покровитель",
+        "aliases": ["небесный покровитель"],
+        "description": "Свет, исцеление и небесная поддержка.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "fiend",
+        "label": "Дьявольский покровитель",
+        "aliases": ["исчадие", "дьявольский покровитель"],
+        "description": "Договор с адскими и демоническими силами.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "great-old-one",
+        "label": "Великий древний",
+        "aliases": ["великий древний"],
+        "description": "Древний разум и космический ужас за гранью мира.",
+        "source": "PHB 2024"
+      }
+    ]
+  },
+  {
+    "key": "wizard",
+    "label": "Волшебник",
+    "aliases": ["маг", "волшебник", "визард"],
+    "description": "Учёный маг, овладевший чарами через знания и дисциплину.",
+    "source": "PHB 2024",
+    "base_hp": 6,
+    "primary_stat": "intelligence",
+    "subclass_level": 3,
+    "subclasses": [
+      {
+        "key": "abjurer",
+        "label": "Абжурер",
+        "aliases": ["абжурер", "абьюрер"],
+        "description": "Защитная магия и контрзаклинания.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "diviner",
+        "label": "Прорицатель",
+        "aliases": ["дивинер", "прорицатель"],
+        "description": "Предвидение и управление вероятностью.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "evoker",
+        "label": "Воплотитель",
+        "aliases": ["эвокер", "воплотитель"],
+        "description": "Разрушительная и стихийная магия.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "illusionist",
+        "label": "Иллюзионист",
+        "aliases": ["иллюзионист"],
+        "description": "Иллюзии и обман восприятия.",
+        "source": "PHB 2024"
+      },
+      {
+        "key": "conjuration",
+        "label": "Школа призыва",
+        "aliases": ["школа призыва"],
+        "description": "Призыв и создание объектов и существ.",
+        "source": "PHB 2014",
+        "legacy": true
+      },
+      {
+        "key": "enchantment",
+        "label": "Школа очарования",
+        "aliases": ["школа очарования"],
+        "description": "Очарование, внушение и контроль разума.",
+        "source": "PHB 2014",
+        "legacy": true
+      },
+      {
+        "key": "necromancy",
+        "label": "Школа некромантии",
+        "aliases": ["школа некромантии"],
+        "description": "Смерть, нежить и жизненная энергия.",
+        "source": "PHB 2014",
+        "legacy": true
+      },
+      {
+        "key": "transmutation",
+        "label": "Школа трансмутации",
+        "aliases": ["школа трансмутации"],
+        "description": "Преобразование материи и формы.",
+        "source": "PHB 2014",
+        "legacy": true
+      },
+      {
+        "key": "bladesinger",
+        "label": "Певец клинка",
+        "aliases": ["певец клинка"],
+        "description": "Маг-фехтовальщик эльфийской традиции.",
+        "source": "Forgotten Realms: Heroes of Faerûn"
+      }
+    ]
   }
 ]
+
+

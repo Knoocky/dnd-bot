@@ -1,38 +1,340 @@
 ﻿[
-  {
-    "key": "человек",
-    "label": "Человек",
-    "description": "Универсальная раса, +1 ко всем характеристикам",
-    "bonuses": {"all": 1}
-  },
-  {
-    "key": "эльф",
-    "label": "Эльф",
-    "description": "+2 Ловкость, +1 Интеллект",
-    "bonuses": {"dexterity": 2, "intelligence": 1}
-  },
-  {
-    "key": "гном",
-    "label": "Гном",
-    "description": "+2 Телосложение, +1 Мудрость",
-    "bonuses": {"constitution": 2, "wisdom": 1}
-  },
-  {
-    "key": "полурослик",
-    "label": "Полурослик",
-    "description": "+2 Ловкость, +1 Харизма",
-    "bonuses": {"dexterity": 2, "charisma": 1}
-  },
-  {
-    "key": "дварф",
-    "label": "Дварф",
-    "description": "+2 Телосложение, +1 Сила",
-    "bonuses": {"constitution": 2, "strength": 1}
-  },
-  {
-    "key": "тифлинг",
-    "label": "Тифлинг",
-    "description": "+2 Харизма, +1 Интеллект",
-    "bonuses": {"charisma": 2, "intelligence": 1}
-  }
+    {
+        "key":  "aasimar",
+        "label":  "Аасимар",
+        "aliases":  [
+                        "аасимар"
+                    ],
+        "description":  "Смертные с искрой Верхних Планов.",
+        "source":  "PHB 2024"
+    },
+    {
+        "key":  "boggart",
+        "label":  "Боггарт",
+        "aliases":  [
+                        "боггарт"
+                    ],
+        "description":  "Фейский народ Lorwyn-Shadowmoor с озорной гоблинской культурой.",
+        "source":  "Lorwyn: First Light"
+    },
+    {
+        "key":  "dhampir",
+        "label":  "Дампир",
+        "aliases":  [
+                        "дампир"
+                    ],
+        "description":  "Полувампирская линия происхождения с тягой к ночи и крови.",
+        "source":  "Astarion\u0027s Book of Hungers"
+    },
+    {
+        "key":  "dragonborn",
+        "label":  "Драконорождённый",
+        "aliases":  [
+                        "драконорождённый",
+                        "драконорожденный"
+                    ],
+        "description":  "Гуманоиды с драконьей кровью и мощным наследием.",
+        "source":  "PHB 2024"
+    },
+    {
+        "key":  "dwarf",
+        "label":  "Дварф",
+        "aliases":  [
+                        "дварф"
+                    ],
+        "description":  "Стойкие подземные ремесленники и воины.",
+        "source":  "PHB 2014",
+        "subraces":  [
+                         {
+                             "key":  "hill",
+                             "label":  "Холмовой",
+                             "aliases":  [
+                                             "hill dwarf",
+                                             "холмовой",
+                                             "холмовой дварф"
+                                         ],
+                             "description":  "Мудрые и выносливые дварфы холмов.",
+                             "source":  "PHB 2014"
+                         },
+                         {
+                             "key":  "mountain",
+                             "label":  "Горный",
+                             "aliases":  [
+                                             "mountain dwarf",
+                                             "горный",
+                                             "горный дварф"
+                                         ],
+                             "description":  "Крепкие дварфы горных твердынь.",
+                             "source":  "PHB 2014"
+                         }
+                     ]
+    },
+    {
+        "key":  "elf",
+        "label":  "Эльф",
+        "aliases":  [
+                        "эльф"
+                    ],
+        "description":  "Долгоживущий магически одарённый народ.",
+        "source":  "PHB 2014",
+        "subraces":  [
+                         {
+                             "key":  "high",
+                             "label":  "Высший",
+                             "aliases":  [
+                                             "high elf",
+                                             "высший",
+                                             "высший эльф"
+                                         ],
+                             "description":  "Эльфы с сильной тягой к магии и знаниям.",
+                             "source":  "PHB 2014"
+                         },
+                         {
+                             "key":  "wood",
+                             "label":  "Лесной",
+                             "aliases":  [
+                                             "wood elf",
+                                             "лесной",
+                                             "лесной эльф"
+                                         ],
+                             "description":  "Скрытные эльфы лесов и дикой природы.",
+                             "source":  "PHB 2014"
+                         },
+                         {
+                             "key":  "drow",
+                             "label":  "Дроу",
+                             "aliases":  [
+                                             "dark elf",
+                                             "дроу",
+                                             "тёмный эльф",
+                                             "темный эльф"
+                                         ],
+                             "description":  "Тёмные эльфы подземных королевств.",
+                             "source":  "PHB 2014"
+                         }
+                     ]
+    },
+    {
+        "key":  "faerie",
+        "label":  "Фейри",
+        "aliases":  [
+                        "фейри",
+                        "фея"
+                    ],
+        "description":  "Крошечные фейские существа Lorwyn-Shadowmoor.",
+        "source":  "Lorwyn: First Light"
+    },
+    {
+        "key":  "flamekin",
+        "label":  "Флеймкин",
+        "aliases":  [
+                        "флеймкин"
+                    ],
+        "description":  "Народ, связанный с огненной и духовной стихией.",
+        "source":  "Lorwyn: First Light"
+    },
+    {
+        "key":  "genasi",
+        "label":  "Генази",
+        "aliases":  [
+                        "генази"
+                    ],
+        "description":  "Носители силы Элементальных Планов.",
+        "source":  "Elemental Evil Player\u0027s Companion",
+        "subraces":  [
+                         {
+                             "key":  "air",
+                             "label":  "Воздушный",
+                             "aliases":  [
+                                             "air genasi",
+                                             "воздушный",
+                                             "воздушный генази"
+                                         ],
+                             "description":  "Генази, связанные с ветром и небом.",
+                             "source":  "Elemental Evil Player\u0027s Companion"
+                         },
+                         {
+                             "key":  "earth",
+                             "label":  "Земной",
+                             "aliases":  [
+                                             "earth genasi",
+                                             "земной",
+                                             "земной генази"
+                                         ],
+                             "description":  "Генази камня, почвы и неподвижной силы.",
+                             "source":  "Elemental Evil Player\u0027s Companion"
+                         },
+                         {
+                             "key":  "fire",
+                             "label":  "Огненный",
+                             "aliases":  [
+                                             "fire genasi",
+                                             "огненный",
+                                             "огненный генази"
+                                         ],
+                             "description":  "Генази, чья кровь пылает огнём.",
+                             "source":  "Elemental Evil Player\u0027s Companion"
+                         },
+                         {
+                             "key":  "water",
+                             "label":  "Водный",
+                             "aliases":  [
+                                             "water genasi",
+                                             "водный",
+                                             "водный генази"
+                                         ],
+                             "description":  "Генази приливов, глубин и течений.",
+                             "source":  "Elemental Evil Player\u0027s Companion"
+                         }
+                     ]
+    },
+    {
+        "key":  "gnome",
+        "label":  "Гном",
+        "aliases":  [
+                        "гном"
+                    ],
+        "description":  "Малый народ изобретателей и иллюзионистов.",
+        "source":  "PHB 2014",
+        "subraces":  [
+                         {
+                             "key":  "forest",
+                             "label":  "Лесной",
+                             "aliases":  [
+                                             "forest gnome",
+                                             "лесной",
+                                             "лесной гном"
+                                         ],
+                             "description":  "Скрытные гномы лесов и звериных троп.",
+                             "source":  "PHB 2014"
+                         },
+                         {
+                             "key":  "rock",
+                             "label":  "Скальный",
+                             "aliases":  [
+                                             "rock gnome",
+                                             "скальный",
+                                             "скальный гном"
+                                         ],
+                             "description":  "Практичные гномы, любящие механику и ремёсла.",
+                             "source":  "PHB 2014"
+                         },
+                         {
+                             "key":  "deep",
+                             "label":  "Глубинный",
+                             "aliases":  [
+                                             "deep gnome",
+                                             "глубинный",
+                                             "глубинный гном"
+                                         ],
+                             "description":  "Подземные гномы, привыкшие к тьме и опасностям.",
+                             "source":  "Mordenkainen\u0027s Tome of Foes"
+                         }
+                     ]
+    },
+    {
+        "key":  "goliath",
+        "label":  "Голиаф",
+        "aliases":  [
+                        "голиаф"
+                    ],
+        "description":  "Горный народ великановьей крови и атлетической мощи.",
+        "source":  "PHB 2024"
+    },
+    {
+        "key":  "half-elf",
+        "label":  "Полуэльф",
+        "aliases":  [
+                        "полуэльф"
+                    ],
+        "description":  "Наследники людей и эльфов, оставшиеся как legacy-опция.",
+        "source":  "PHB 2014",
+        "legacy":  true
+    },
+    {
+        "key":  "half-orc",
+        "label":  "Полуорк",
+        "aliases":  [
+                        "полуорк"
+                    ],
+        "description":  "Наследники людей и орков, оставшиеся как legacy-опция.",
+        "source":  "PHB 2014",
+        "legacy":  true
+    },
+    {
+        "key":  "halfling",
+        "label":  "Полурослик",
+        "aliases":  [
+                        "полурослик"
+                    ],
+        "description":  "Удачливый и скрытный малый народ.",
+        "source":  "PHB 2014",
+        "subraces":  [
+                         {
+                             "key":  "lightfoot",
+                             "label":  "Легконогий",
+                             "aliases":  [
+                                             "lightfoot halfling",
+                                             "легконогий"
+                                         ],
+                             "description":  "Общительные и ловкие странники.",
+                             "source":  "PHB 2014"
+                         },
+                         {
+                             "key":  "stout",
+                             "label":  "Коренастый",
+                             "aliases":  [
+                                             "stout halfling",
+                                             "коренастый"
+                                         ],
+                             "description":  "Крепкие и выносливые полурослики.",
+                             "source":  "PHB 2014"
+                         }
+                     ]
+    },
+    {
+        "key":  "human",
+        "label":  "Человек",
+        "aliases":  [
+                        "человек"
+                    ],
+        "description":  "Самый гибкий и распространённый вид.",
+        "source":  "PHB 2014"
+    },
+    {
+        "key":  "khoravar",
+        "label":  "Кхоравар",
+        "aliases":  [
+                        "кхоравар"
+                    ],
+        "description":  "Эберронская трактовка полуэльфов как отдельного народа.",
+        "source":  "Eberron: Forge of the Artificer"
+    },
+    {
+        "key":  "kithkin",
+        "label":  "Киткин",
+        "aliases":  [
+                        "киткин"
+                    ],
+        "description":  "Народ Lorwyn-Shadowmoor с сильными общинными связями.",
+        "source":  "Lorwyn: First Light"
+    },
+    {
+        "key":  "orc",
+        "label":  "Орк",
+        "aliases":  [
+                        "орк"
+                    ],
+        "description":  "Могучие кочевники и воины, ставшие базовым видом в 2024.",
+        "source":  "PHB 2024"
+    },
+    {
+        "key":  "tiefling",
+        "label":  "Тифлинг",
+        "aliases":  [
+                        "тифлинг"
+                    ],
+        "description":  "Народ с инфернальным происхождением и богатой вариативностью наследия.",
+        "source":  "PHB 2014"
+    }
 ]

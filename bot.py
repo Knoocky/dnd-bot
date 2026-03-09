@@ -1,15 +1,21 @@
-﻿import argparse
+import argparse
 import asyncio
 import os
+from pathlib import Path
 
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 
-import ai_provider
-import database as db
+from logger_config import configure_logging
+
+BASE_DIR = Path(__file__).resolve().parent
 
 load_dotenv()
+logger = configure_logging(BASE_DIR)
+
+import ai_provider
+import database as db
 
 
 def parse_args():
@@ -28,7 +34,7 @@ args = parse_args()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 PREFIX = os.getenv("BOT_PREFIX", "!")
 
-selected_provider = args.provider or os.getenv("AI_PROVIDER", "claude")
+selected_provider = args.provider or os.getenv("AI_PROVIDER", ai_provider.DEFAULT_PROVIDER)
 ai_provider.configure_provider(selected_provider)
 
 intents = discord.Intents.default()
@@ -46,10 +52,10 @@ bot.ai_model = ai_provider.get_model_name()
 @bot.event
 async def on_ready():
     db.init_db()
-    print(f"Bot started: {bot.user} (ID: {bot.user.id})")
-    print(f"Guilds: {len(bot.guilds)}")
-    print(f"AI provider: {bot.ai_provider} | model: {bot.ai_model}")
-    await bot.change_presence(activity=discord.Game(name="D&D | !помощь_днд"))
+    logger.info("Bot started: %s (ID: %s)", bot.user, bot.user.id)
+    logger.info("Guilds: %s", len(bot.guilds))
+    logger.info("AI provider: %s | model: %s", bot.ai_provider, bot.ai_model)
+    await bot.change_presence(activity=discord.Game(name="D&D | !помощь"))
 
 
 @bot.event
@@ -61,17 +67,19 @@ async def on_command_error(ctx, error):
     elif isinstance(error, commands.CommandNotFound):
         pass
     else:
-        print(f"Ошибка: {error}")
+        logger.exception("Unhandled command error", exc_info=error)
 
 
 async def main():
     if not DISCORD_TOKEN:
         raise RuntimeError("Не найден DISCORD_TOKEN в .env")
 
+    logger.info("Starting bot bootstrap")
     ai_provider.validate_configuration()
 
     async with bot:
         await bot.load_extension("cogs.character")
+        await bot.load_extension("cogs.leveling")
         await bot.load_extension("cogs.game")
         await bot.load_extension("cogs.inventory")
         await bot.start(DISCORD_TOKEN)

@@ -4,6 +4,24 @@ from datetime import datetime
 
 DB_PATH = "dnd_game.db"
 
+CAMPAIGN_DEFAULTS = {
+    "ruleset": "dnd_2024_phb",
+    "leveling_mode": "xp_auto_ai",
+    "hp_gain_mode": None,
+    "scene_round_timeout_minutes": 5,
+}
+
+CHARACTER_JSON_FIELDS = {
+    "origin_asi": "origin_asi_json",
+    "class_levels": "class_levels_json",
+    "build_choices": "build_choices_json",
+    "feats": "feats_json",
+    "resources": "resources_json",
+    "spellcasting": "spellcasting_json",
+    "hit_dice": "hit_dice_json",
+    "levelup_state": "levelup_state_json",
+}
+
 
 def utcnow_iso() -> str:
     return datetime.utcnow().isoformat()
@@ -29,6 +47,9 @@ def _character_from_row(row):
         return None
     char = dict(row)
     char["inventory"] = _loads_json(char.get("inventory"), [])
+    for logical_field, db_field in CHARACTER_JSON_FIELDS.items():
+        default = {} if logical_field in {"origin_asi", "class_levels", "build_choices", "resources", "spellcasting", "hit_dice", "levelup_state"} else []
+        char[logical_field] = _loads_json(char.get(db_field), default)
     return char
 
 
@@ -38,6 +59,15 @@ def _campaign_from_row(row):
     campaign = dict(row)
     campaign["roll_mode"] = campaign.get("roll_mode") or None
     campaign["setup_status"] = campaign.get("setup_status") or "ready"
+    campaign["intro_status"] = campaign.get("intro_status") or "not_started"
+    campaign["intro_answers"] = _loads_json(campaign.get("intro_answers_json"), {})
+    campaign["ruleset"] = campaign.get("ruleset") or CAMPAIGN_DEFAULTS["ruleset"]
+    campaign["leveling_mode"] = campaign.get("leveling_mode") or CAMPAIGN_DEFAULTS["leveling_mode"]
+    campaign["hp_gain_mode"] = campaign.get("hp_gain_mode") or CAMPAIGN_DEFAULTS["hp_gain_mode"]
+    campaign["scene_round_timeout_minutes"] = (
+        campaign.get("scene_round_timeout_minutes")
+        or CAMPAIGN_DEFAULTS["scene_round_timeout_minutes"]
+    )
     return campaign
 
 
@@ -74,6 +104,31 @@ def _ensure_campaign_columns(conn):
         conn.execute("ALTER TABLE campaigns ADD COLUMN setup_status TEXT DEFAULT 'ready'")
     if "setup_owner_user_id" not in existing_columns:
         conn.execute("ALTER TABLE campaigns ADD COLUMN setup_owner_user_id TEXT")
+    if "ruleset" not in existing_columns:
+        conn.execute("ALTER TABLE campaigns ADD COLUMN ruleset TEXT DEFAULT 'dnd_2024_phb'")
+    if "leveling_mode" not in existing_columns:
+        conn.execute("ALTER TABLE campaigns ADD COLUMN leveling_mode TEXT DEFAULT 'xp_auto_ai'")
+    if "hp_gain_mode" not in existing_columns:
+        conn.execute("ALTER TABLE campaigns ADD COLUMN hp_gain_mode TEXT")
+    if "intro_status" not in existing_columns:
+        conn.execute("ALTER TABLE campaigns ADD COLUMN intro_status TEXT DEFAULT 'not_started'")
+    if "intro_answers_json" not in existing_columns:
+        conn.execute("ALTER TABLE campaigns ADD COLUMN intro_answers_json TEXT DEFAULT '{}'")
+    if "scene_round_timeout_minutes" not in existing_columns:
+        conn.execute("ALTER TABLE campaigns ADD COLUMN scene_round_timeout_minutes INTEGER DEFAULT 5")
+
+
+def _ensure_character_columns(conn):
+    existing_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(characters)").fetchall()
+    }
+    if "subrace" not in existing_columns:
+        conn.execute("ALTER TABLE characters ADD COLUMN subrace TEXT")
+    if "subclass" not in existing_columns:
+        conn.execute("ALTER TABLE characters ADD COLUMN subclass TEXT")
+    for db_field in CHARACTER_JSON_FIELDS.values():
+        if db_field not in existing_columns:
+            conn.execute(f"ALTER TABLE characters ADD COLUMN {db_field} TEXT")
 
 
 def init_db():
@@ -91,6 +146,12 @@ def init_db():
             roll_mode TEXT DEFAULT 'bot_auto',
             setup_status TEXT DEFAULT 'ready',
             setup_owner_user_id TEXT,
+            ruleset TEXT DEFAULT 'dnd_2024_phb',
+            leveling_mode TEXT DEFAULT 'xp_auto_ai',
+            hp_gain_mode TEXT,
+            intro_status TEXT DEFAULT 'not_started',
+            intro_answers_json TEXT DEFAULT '{}',
+            scene_round_timeout_minutes INTEGER DEFAULT 5,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -100,7 +161,9 @@ def init_db():
             campaign_id INTEGER NOT NULL,
             name TEXT NOT NULL,
             race TEXT NOT NULL,
+            subrace TEXT,
             class TEXT NOT NULL,
+            subclass TEXT,
             level INTEGER DEFAULT 1,
             exp INTEGER DEFAULT 0,
             hp INTEGER NOT NULL,
@@ -113,6 +176,14 @@ def init_db():
             charisma INTEGER DEFAULT 10,
             gold INTEGER DEFAULT 10,
             inventory TEXT DEFAULT '[]',
+            origin_asi_json TEXT,
+            class_levels_json TEXT,
+            build_choices_json TEXT,
+            feats_json TEXT,
+            resources_json TEXT,
+            spellcasting_json TEXT,
+            hit_dice_json TEXT,
+            levelup_state_json TEXT,
             is_alive INTEGER DEFAULT 1,
             FOREIGN KEY (campaign_id) REFERENCES campaigns(id),
             UNIQUE(user_id, campaign_id)
@@ -196,9 +267,46 @@ def init_db():
         CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_roll_requests_open
             ON pending_roll_requests(campaign_id, user_id)
             WHERE status = 'open';
+
+        CREATE TABLE IF NOT EXISTS xp_awards (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            campaign_id INTEGER NOT NULL,
+            source_message_id TEXT NOT NULL,
+            assistant_message_id TEXT,
+            reason TEXT,
+            amount INTEGER NOT NULL DEFAULT 0,
+            awarded_json TEXT DEFAULT '[]',
+            created_at TEXT NOT NULL,
+            UNIQUE(campaign_id, source_message_id),
+            FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS levelup_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            campaign_id INTEGER NOT NULL,
+            user_id TEXT NOT NULL,
+            character_name_snapshot TEXT NOT NULL,
+            target_level INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            queued_at TEXT NOT NULL,
+            activated_at TEXT,
+            completed_at TEXT,
+            FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS levelup_sessions (
+            campaign_id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            character_name_snapshot TEXT NOT NULL,
+            state_json TEXT NOT NULL DEFAULT '{}',
+            started_at TEXT NOT NULL,
+            last_activity_at TEXT NOT NULL,
+            FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
+        );
         """
     )
     _ensure_campaign_columns(conn)
+    _ensure_character_columns(conn)
 
     conn.commit()
     conn.close()
@@ -217,10 +325,19 @@ def create_campaign(
     c = conn.cursor()
     c.execute(
         """
-        INSERT INTO campaigns (guild_id, channel_id, title, roll_mode, setup_status, setup_owner_user_id)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO campaigns (
+            guild_id,
+            channel_id,
+            title,
+            roll_mode,
+            setup_status,
+            setup_owner_user_id,
+            intro_status,
+            intro_answers_json
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (guild_id, channel_id, title, None, "awaiting_roll_mode", setup_owner_user_id),
+        (guild_id, channel_id, title, None, "awaiting_roll_mode", setup_owner_user_id, "not_started", "{}"),
     )
     campaign_id = c.lastrowid
     conn.commit()
@@ -251,8 +368,47 @@ def get_active_campaign(channel_id: str):
 def set_campaign_roll_mode(campaign_id: int, roll_mode: str):
     conn = get_connection()
     conn.execute(
-        "UPDATE campaigns SET roll_mode = ?, setup_status = 'ready' WHERE id = ?",
-        (roll_mode, campaign_id),
+        "UPDATE campaigns SET roll_mode = ?, setup_status = ? WHERE id = ?",
+        (roll_mode, "awaiting_hp_gain_mode", campaign_id),
+    )
+    conn.commit()
+    conn.close()
+    return get_campaign(campaign_id)
+
+
+def set_campaign_hp_gain_mode(campaign_id: int, hp_gain_mode: str):
+    conn = get_connection()
+    conn.execute(
+        "UPDATE campaigns SET hp_gain_mode = ?, setup_status = ? WHERE id = ?",
+        (hp_gain_mode, "ready", campaign_id),
+    )
+    conn.commit()
+    conn.close()
+    return get_campaign(campaign_id)
+
+
+def set_campaign_intro_state(campaign_id: int, intro_status: str, intro_answers: dict | None = None):
+    conn = get_connection()
+    if intro_answers is None:
+        conn.execute(
+            "UPDATE campaigns SET intro_status = ? WHERE id = ?",
+            (intro_status, campaign_id),
+        )
+    else:
+        conn.execute(
+            "UPDATE campaigns SET intro_status = ?, intro_answers_json = ? WHERE id = ?",
+            (intro_status, json.dumps(intro_answers, ensure_ascii=False), campaign_id),
+        )
+    conn.commit()
+    conn.close()
+    return get_campaign(campaign_id)
+
+
+def set_campaign_scene_round_timeout(campaign_id: int, timeout_minutes: int):
+    conn = get_connection()
+    conn.execute(
+        "UPDATE campaigns SET scene_round_timeout_minutes = ? WHERE id = ?",
+        (timeout_minutes, campaign_id),
     )
     conn.commit()
     conn.close()
@@ -279,24 +435,35 @@ def create_character(user_id: str, campaign_id: int, data: dict) -> bool:
         conn.execute(
             """
             INSERT INTO characters
-            (user_id, campaign_id, name, race, class, hp, max_hp,
-             strength, dexterity, constitution, intelligence, wisdom, charisma)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (user_id, campaign_id, name, race, subrace, class, subclass, hp, max_hp,
+             strength, dexterity, constitution, intelligence, wisdom, charisma, origin_asi_json,
+             class_levels_json, build_choices_json, feats_json, resources_json, spellcasting_json, hit_dice_json, levelup_state_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
                 campaign_id,
                 data["name"],
                 data["race"],
+                data.get("subrace"),
                 data["class"],
+                data.get("subclass"),
                 data["hp"],
-                data["hp"],
+                data.get("max_hp", data["hp"]),
                 data["strength"],
                 data["dexterity"],
                 data["constitution"],
                 data["intelligence"],
                 data["wisdom"],
                 data["charisma"],
+                json.dumps(data.get("origin_asi", {}), ensure_ascii=False),
+                json.dumps(data.get("class_levels", {}), ensure_ascii=False),
+                json.dumps(data.get("build_choices", {}), ensure_ascii=False),
+                json.dumps(data.get("feats", []), ensure_ascii=False),
+                json.dumps(data.get("resources", {}), ensure_ascii=False),
+                json.dumps(data.get("spellcasting", {}), ensure_ascii=False),
+                json.dumps(data.get("hit_dice", {}), ensure_ascii=False),
+                json.dumps(data.get("levelup_state", {}), ensure_ascii=False),
             ),
         )
         conn.commit()
@@ -330,12 +497,237 @@ def get_all_characters(campaign_id: int):
 def update_character(user_id: str, campaign_id: int, updates: dict):
     if "inventory" in updates:
         updates["inventory"] = json.dumps(updates["inventory"], ensure_ascii=False)
+    for logical_field, db_field in CHARACTER_JSON_FIELDS.items():
+        if logical_field in updates:
+            updates[db_field] = json.dumps(updates.pop(logical_field), ensure_ascii=False)
+        if db_field in updates and not isinstance(updates[db_field], str):
+            updates[db_field] = json.dumps(updates[db_field], ensure_ascii=False)
     fields = ", ".join(f"{key} = ?" for key in updates)
     values = list(updates.values()) + [user_id, campaign_id]
     conn = get_connection()
     conn.execute(
         f"UPDATE characters SET {fields} WHERE user_id = ? AND campaign_id = ?",
         values,
+    )
+    conn.commit()
+    conn.close()
+
+
+# Leveling and XP
+
+
+def get_xp_award(campaign_id: int, source_message_id: str):
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM xp_awards WHERE campaign_id = ? AND source_message_id = ?",
+        (campaign_id, source_message_id),
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+    item = dict(row)
+    item["awarded"] = _loads_json(item.get("awarded_json"), [])
+    return item
+
+
+def get_latest_xp_award(campaign_id: int):
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM xp_awards WHERE campaign_id = ? ORDER BY datetime(created_at) DESC, id DESC LIMIT 1",
+        (campaign_id,),
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+    item = dict(row)
+    item["awarded"] = _loads_json(item.get("awarded_json"), [])
+    return item
+
+
+def record_xp_award(
+    campaign_id: int,
+    source_message_id: str,
+    assistant_message_id: str | None,
+    amount: int,
+    reason: str,
+    awarded: list[dict],
+):
+    if get_xp_award(campaign_id, source_message_id):
+        return None
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO xp_awards (campaign_id, source_message_id, assistant_message_id, reason, amount, awarded_json, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            campaign_id,
+            source_message_id,
+            assistant_message_id,
+            reason,
+            amount,
+            json.dumps(awarded, ensure_ascii=False),
+            utcnow_iso(),
+        ),
+    )
+    award_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return award_id
+
+
+def adjust_character_xp(user_id: str, campaign_id: int, delta: int):
+    char = get_character(user_id, campaign_id)
+    if not char:
+        return None
+    new_exp = max(0, int(char.get("exp", 0)) + int(delta))
+    update_character(user_id, campaign_id, {"exp": new_exp})
+    return get_character(user_id, campaign_id)
+
+
+def get_levelup_queue(campaign_id: int, statuses: tuple[str, ...] | None = None):
+    conn = get_connection()
+    if statuses:
+        placeholders = ", ".join("?" for _ in statuses)
+        rows = conn.execute(
+            f"SELECT * FROM levelup_queue WHERE campaign_id = ? AND status IN ({placeholders}) ORDER BY id ASC",
+            (campaign_id, *statuses),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM levelup_queue WHERE campaign_id = ? ORDER BY id ASC",
+            (campaign_id,),
+        ).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def get_user_levelup_queue_entry(campaign_id: int, user_id: str, statuses: tuple[str, ...] = ("pending", "active")):
+    conn = get_connection()
+    placeholders = ", ".join("?" for _ in statuses)
+    row = conn.execute(
+        f"SELECT * FROM levelup_queue WHERE campaign_id = ? AND user_id = ? AND status IN ({placeholders}) ORDER BY id ASC LIMIT 1",
+        (campaign_id, user_id, *statuses),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def enqueue_levelup(campaign_id: int, user_id: str, character_name: str, target_level: int):
+    existing = get_user_levelup_queue_entry(campaign_id, user_id)
+    if existing:
+        if int(existing.get("target_level", 1)) >= int(target_level):
+            return existing
+        conn = get_connection()
+        conn.execute(
+            "UPDATE levelup_queue SET target_level = ? WHERE id = ?",
+            (target_level, existing["id"]),
+        )
+        conn.commit()
+        conn.close()
+        return get_user_levelup_queue_entry(campaign_id, user_id)
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO levelup_queue (campaign_id, user_id, character_name_snapshot, target_level, status, queued_at)
+        VALUES (?, ?, ?, ?, 'pending', ?)
+        """,
+        (campaign_id, user_id, character_name, target_level, utcnow_iso()),
+    )
+    queue_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return next((item for item in get_levelup_queue(campaign_id, ("pending", "active")) if item["id"] == queue_id), None)
+
+
+def activate_levelup_queue_entry(queue_id: int):
+    conn = get_connection()
+    conn.execute(
+        "UPDATE levelup_queue SET status = 'active', activated_at = ? WHERE id = ?",
+        (utcnow_iso(), queue_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def complete_levelup_queue_entry(queue_id: int):
+    conn = get_connection()
+    conn.execute(
+        "UPDATE levelup_queue SET status = 'completed', completed_at = ? WHERE id = ?",
+        (utcnow_iso(), queue_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def release_levelup_queue_entry(queue_id: int):
+    conn = get_connection()
+    conn.execute(
+        "UPDATE levelup_queue SET status = 'pending', activated_at = NULL WHERE id = ? AND status = 'active'",
+        (queue_id,),
+    )
+    conn.commit()
+    conn.close()
+
+
+def clear_levelup_queue(campaign_id: int):
+    conn = get_connection()
+    conn.execute(
+        "UPDATE levelup_queue SET status = 'cancelled', completed_at = ? WHERE campaign_id = ? AND status IN ('pending', 'active')",
+        (utcnow_iso(), campaign_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_active_levelup_session(campaign_id: int):
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM levelup_sessions WHERE campaign_id = ?",
+        (campaign_id,),
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+    session = dict(row)
+    session["state"] = _loads_json(session.get("state_json"), {})
+    return session
+
+
+def upsert_levelup_session(campaign_id: int, user_id: str, character_name: str, state: dict):
+    now = utcnow_iso()
+    conn = get_connection()
+    conn.execute(
+        """
+        INSERT INTO levelup_sessions (campaign_id, user_id, character_name_snapshot, state_json, started_at, last_activity_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(campaign_id) DO UPDATE SET
+            user_id = excluded.user_id,
+            character_name_snapshot = excluded.character_name_snapshot,
+            state_json = excluded.state_json,
+            last_activity_at = excluded.last_activity_at
+        """,
+        (campaign_id, user_id, character_name, json.dumps(state, ensure_ascii=False), now, now),
+    )
+    conn.commit()
+    conn.close()
+    return get_active_levelup_session(campaign_id)
+
+
+def delete_levelup_session(campaign_id: int):
+    conn = get_connection()
+    conn.execute("DELETE FROM levelup_sessions WHERE campaign_id = ?", (campaign_id,))
+    conn.commit()
+    conn.close()
+
+
+def touch_levelup_session(campaign_id: int):
+    conn = get_connection()
+    conn.execute(
+        "UPDATE levelup_sessions SET last_activity_at = ? WHERE campaign_id = ?",
+        (utcnow_iso(), campaign_id),
     )
     conn.commit()
     conn.close()
@@ -785,3 +1177,6 @@ def mark_scene_round_idle_stopped(round_id: int):
     )
     conn.commit()
     conn.close()
+
+
+
