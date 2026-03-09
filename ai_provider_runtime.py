@@ -89,9 +89,7 @@ def configure_provider(provider: str | None):
     normalized = PROVIDER_ALIASES.get(raw_provider.strip().lower())
     if not normalized:
         supported = ", ".join(sorted(set(PROVIDER_ALIASES)))
-        raise RuntimeError(
-            f"Неизвестный AI provider: {raw_provider}. Доступно: {supported}"
-        )
+        raise RuntimeError(f"Неизвестный AI provider: {raw_provider}. Доступно: {supported}")
     _provider = normalized
 
 
@@ -104,6 +102,8 @@ def get_provider() -> str:
 
 def get_model_name() -> str:
     provider = get_provider()
+    if provider == "local":
+        return _resolve_local_model_name()
     if provider == "claude":
         return os.getenv("ANTHROPIC_MODEL", DEFAULT_MODELS["claude"])
     return os.getenv("OPENAI_MODEL", DEFAULT_MODELS["gpt"])
@@ -111,10 +111,11 @@ def get_model_name() -> str:
 
 def validate_configuration():
     provider = get_provider()
+    if provider == "local":
+        _resolve_local_model_name()
+        return
     if provider == "claude" and not os.getenv("ANTHROPIC_API_KEY"):
-        raise RuntimeError(
-            "Для провайдера Claude нужен ANTHROPIC_API_KEY в .env"
-        )
+        raise RuntimeError("Для провайдера Claude нужен ANTHROPIC_API_KEY в .env")
     if provider == "gpt" and not os.getenv("OPENAI_API_KEY"):
         raise RuntimeError("Для провайдера GPT нужен OPENAI_API_KEY в .env")
 
@@ -122,9 +123,7 @@ def validate_configuration():
 def _get_anthropic_client():
     global _anthropic_client
     if _anthropic_client is None:
-        _anthropic_client = anthropic.Anthropic(
-            api_key=os.getenv("ANTHROPIC_API_KEY")
-        )
+        _anthropic_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
     return _anthropic_client
 
 
@@ -133,6 +132,16 @@ def _get_openai_client():
     if _openai_client is None:
         _openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     return _openai_client
+
+
+def _get_local_openai_client():
+    global _local_openai_client
+    if _local_openai_client is None:
+        _local_openai_client = OpenAI(
+            base_url=_get_local_base_url(),
+            api_key=_get_local_api_key(),
+        )
+    return _local_openai_client
 
 
 def _openai_output_type_summary(response) -> list[str]:
@@ -254,6 +263,124 @@ def _extract_openai_output_with_retry(response, request_kwargs: dict) -> str:
     return _extract_openai_output(retry_response)
 
 
+def _chat_message_content_to_text(content) -> str:
+    if isinstance(content, str):
+        return content
+    if content is None:
+        return ""
+
+    chunks = []
+    for item in content:
+        if isinstance(item, str):
+            if item:
+                chunks.append(item)
+            continue
+        if isinstance(item, dict):
+            if item.get("type") == "text" and item.get("text"):
+                chunks.append(str(item["text"]))
+            continue
+        text = getattr(item, "text", None)
+        if text:
+            chunks.append(str(text))
+    return "".join(chunks)
+
+
+def _extract_local_chat_output(response) -> str:
+    choices = getattr(response, "choices", None) or []
+    if not choices:
+        raise RuntimeError("Локальная модель llama.cpp вернула ответ без choices.")
+
+    message = getattr(choices[0], "message", None)
+    content = getattr(message, "content", None)
+    text = _chat_message_content_to_text(content).strip()
+    if text:
+        return text
+
+    raise RuntimeError("Локальная модель llama.cpp вернула ответ без текстового сообщения.")
+
+
+def _extract_model_id(item) -> str | None:
+    if isinstance(item, dict):
+        for key in ("id", "model", "name"):
+            value = item.get(key)
+            if value:
+                return str(value)
+        return None
+
+    for attr in ("id", "model", "name"):
+        value = getattr(item, attr, None)
+        if value:
+            return str(value)
+    return None
+
+
+def _extract_first_local_model_id(models_response) -> str:
+    data = getattr(models_response, "data", None)
+    if data is None and isinstance(models_response, dict):
+        data = models_response.get("data")
+    if not data and isinstance(models_response, dict):
+        data = models_response.get("models")
+
+    if not data:
+        raise RuntimeError("Локальный сервер llama.cpp не вернул ни одной модели.")
+
+    model_id = _extract_model_id(data[0])
+    if not model_id:
+        raise RuntimeError("Локальный сервер llama.cpp вернул модель без идентификатора.")
+    return model_id
+
+
+def _resolve_local_model_name() -> str:
+    global _local_model_name
+
+    configured_model = (os.getenv("LLAMA_CPP_MODEL") or "").strip()
+    if configured_model:
+        return configured_model
+
+    if _local_model_name:
+        return _local_model_name
+
+    base_url = _get_local_base_url()
+    try:
+        models_response = _get_local_openai_client().models.list()
+        _local_model_name = _extract_first_local_model_id(models_response)
+        logger.info("Resolved local llama.cpp model from %s: %s", base_url, _local_model_name)
+        return _local_model_name
+    except (openai.APIConnectionError, openai.APITimeoutError):
+        logger.warning("Local llama.cpp connection error. base_url=%s", base_url)
+        raise RuntimeError(
+            f"🌐 **Нет соединения с локальной моделью llama.cpp.** Проверь сервер на `{base_url}`."
+        ) from None
+    except openai.APIStatusError as error:
+        details = _openai_status_error_details(error)
+        if error.status_code == 503 and "loading model" in details.lower():
+            raise RuntimeError("⏳ **Локальная модель llama.cpp ещё загружается.** Подожди немного и попробуй снова.") from None
+        logger.warning(
+            "Local llama.cpp model list error. status=%s request_id=%s details=%s",
+            error.status_code,
+            _exception_request_id(error) or "unknown",
+            details,
+        )
+        raise RuntimeError(f"⚠️ **Ошибка локального сервера llama.cpp ({error.status_code})**: {details}") from None
+    except RuntimeError:
+        raise
+    except Exception as error:
+        logger.exception("Unexpected local llama.cpp model resolution error")
+        raise RuntimeError("⚠️ **Не удалось получить список моделей llama.cpp.** Проверь локальный сервер.") from error
+
+
+def _build_local_chat_messages(system_prompt: str, messages: list) -> list[dict]:
+    local_messages = [{"role": "system", "content": system_prompt}]
+    for message in messages:
+        local_messages.append(
+            {
+                "role": message.get("role", "user"),
+                "content": message.get("content", ""),
+            }
+        )
+    return local_messages
+
+
 def _call_claude_api(system_prompt: str, messages: list, max_tokens: int = 1000) -> str:
     try:
         logger.debug(
@@ -271,35 +398,21 @@ def _call_claude_api(system_prompt: str, messages: list, max_tokens: int = 1000)
         logger.debug("Claude request completed. model=%s", get_model_name())
         return response.content[0].text
     except AnthropicRateLimitError:
-        raise RuntimeError(
-            "💸 **Лимиты Claude исчерпаны.** Проверь баланс и квоты в Anthropic."
-        ) from None
+        raise RuntimeError("💸 **Лимиты Claude исчерпаны.** Проверь баланс и квоты в Anthropic.") from None
     except AnthropicStatusError as error:
         error_text = str(error).lower()
         if error.status_code == 401:
-            raise RuntimeError(
-                "🔑 **Неверный API-ключ Claude.** Проверь `ANTHROPIC_API_KEY`."
-            ) from None
+            raise RuntimeError("🔑 **Неверный API-ключ Claude.** Проверь `ANTHROPIC_API_KEY`.") from None
         if error.status_code == 529:
-            raise RuntimeError(
-                "⏳ **Серверы Anthropic перегружены.** Попробуй ещё раз чуть позже."
-            ) from None
+            raise RuntimeError("⏳ **Серверы Anthropic перегружены.** Попробуй ещё раз чуть позже.") from None
         if error.status_code == 400 and "credit balance is too low" in error_text:
-            raise RuntimeError(
-                "💸 **У Anthropic закончился баланс.** Проверь биллинг в консоли."
-            ) from None
-        raise RuntimeError(
-            f"⚠️ **Ошибка Claude API ({error.status_code})**: {error.message}"
-        ) from None
+            raise RuntimeError("💸 **У Anthropic закончился баланс.** Проверь биллинг в консоли.") from None
+        raise RuntimeError(f"⚠️ **Ошибка Claude API ({error.status_code})**: {error.message}") from None
     except AnthropicConnectionError:
-        raise RuntimeError(
-            "🌐 **Нет соединения с Anthropic.** Проверь интернет-подключение."
-        ) from None
+        raise RuntimeError("🌐 **Нет соединения с Anthropic.** Проверь интернет-подключение.") from None
     except Exception as error:
         logger.exception("Unexpected Claude SDK error")
-        raise RuntimeError(
-            "⚠️ **Неожиданная ошибка Claude API.** Попробуй ещё раз чуть позже."
-        ) from error
+        raise RuntimeError("⚠️ **Неожиданная ошибка Claude API.** Попробуй ещё раз чуть позже.") from error
 
 
 def _call_openai_api(
@@ -324,13 +437,9 @@ def _call_openai_api(
         response = _send_openai_request(request_kwargs)
         return _extract_openai_output_with_retry(response, request_kwargs)
     except openai.RateLimitError:
-        raise RuntimeError(
-            "💸 **Лимиты GPT/OpenAI исчерпаны.** Проверь квоты и биллинг в OpenAI."
-        ) from None
+        raise RuntimeError("💸 **Лимиты GPT/OpenAI исчерпаны.** Проверь квоты и биллинг в OpenAI.") from None
     except openai.AuthenticationError:
-        raise RuntimeError(
-            "🔑 **Неверный API-ключ OpenAI.** Проверь `OPENAI_API_KEY`."
-        ) from None
+        raise RuntimeError("🔑 **Неверный API-ключ OpenAI.** Проверь `OPENAI_API_KEY`.") from None
     except openai.APIStatusError as error:
         request_id = _exception_request_id(error) or "unknown"
         details = _openai_status_error_details(error)
@@ -351,18 +460,14 @@ def _call_openai_api(
             response = _send_openai_request(fallback_kwargs)
             return _extract_openai_output_with_retry(response, fallback_kwargs)
 
-        if error.status_code == 400 and (
-            "insufficient_quota" in error_text or "billing" in error_text
-        ):
+        if error.status_code == 400 and ("insufficient_quota" in error_text or "billing" in error_text):
             logger.warning(
                 "OpenAI quota or billing error. status=%s request_id=%s details=%s",
                 error.status_code,
                 request_id,
                 details,
             )
-            raise RuntimeError(
-                "💸 **Недостаточно квоты OpenAI.** Проверь биллинг и лимиты."
-            ) from None
+            raise RuntimeError("💸 **Недостаточно квоты OpenAI.** Проверь биллинг и лимиты.") from None
 
         if error.status_code >= 500:
             logger.warning(
@@ -371,9 +476,7 @@ def _call_openai_api(
                 request_id,
                 details,
             )
-            raise RuntimeError(
-                "⏳ **Сервер OpenAI временно недоступен.** Попробуй позже."
-            ) from None
+            raise RuntimeError("⏳ **Сервер OpenAI временно недоступен.** Попробуй позже.") from None
 
         logger.warning(
             "OpenAI API status error. status=%s request_id=%s details=%s",
@@ -381,21 +484,62 @@ def _call_openai_api(
             request_id,
             details,
         )
-        raise RuntimeError(
-            f"⚠️ **Ошибка OpenAI API ({error.status_code})**: {details}"
-        ) from None
+        raise RuntimeError(f"⚠️ **Ошибка OpenAI API ({error.status_code})**: {details}") from None
     except (openai.APIConnectionError, openai.APITimeoutError):
         logger.warning("OpenAI connection or timeout error")
-        raise RuntimeError(
-            "🌐 **Нет соединения с OpenAI.** Проверь интернет-подключение."
-        ) from None
+        raise RuntimeError("🌐 **Нет соединения с OpenAI.** Проверь интернет-подключение.") from None
     except RuntimeError:
         raise
     except Exception as error:
         logger.exception("Unexpected OpenAI SDK error")
-        raise RuntimeError(
-            "⚠️ **Неожиданная ошибка OpenAI API.** Попробуй ещё раз чуть позже."
-        ) from error
+        raise RuntimeError("⚠️ **Неожиданная ошибка OpenAI API.** Попробуй ещё раз чуть позже.") from error
+
+
+def _call_local_api(system_prompt: str, messages: list, max_tokens: int = 1000) -> str:
+    base_url = _get_local_base_url()
+    request_kwargs = {
+        "model": get_model_name(),
+        "messages": _build_local_chat_messages(system_prompt, messages),
+        "max_tokens": max_tokens,
+    }
+
+    try:
+        logger.debug(
+            "Local llama.cpp request started. base_url=%s model=%s messages=%s max_tokens=%s",
+            base_url,
+            request_kwargs["model"],
+            len(request_kwargs["messages"]),
+            max_tokens,
+        )
+        response = _get_local_openai_client().chat.completions.create(**request_kwargs)
+        logger.debug(
+            "Local llama.cpp request completed. base_url=%s model=%s request_id=%s",
+            base_url,
+            request_kwargs["model"],
+            _response_request_id(response) or "unknown",
+        )
+        return _extract_local_chat_output(response)
+    except openai.AuthenticationError:
+        raise RuntimeError("🔑 **Локальный сервер llama.cpp отклонил ключ.** Проверь `LLAMA_CPP_API_KEY`.") from None
+    except openai.APIStatusError as error:
+        details = _openai_status_error_details(error)
+        if error.status_code == 503 and "loading model" in details.lower():
+            raise RuntimeError("⏳ **Локальная модель llama.cpp ещё загружается.** Подожди немного и попробуй снова.") from None
+        logger.warning(
+            "Local llama.cpp API status error. status=%s request_id=%s details=%s",
+            error.status_code,
+            _exception_request_id(error) or "unknown",
+            details,
+        )
+        raise RuntimeError(f"⚠️ **Ошибка локального сервера llama.cpp ({error.status_code})**: {details}") from None
+    except (openai.APIConnectionError, openai.APITimeoutError):
+        logger.warning("Local llama.cpp connection or timeout error. base_url=%s", base_url)
+        raise RuntimeError(f"🌐 **Нет соединения с локальной моделью llama.cpp.** Проверь сервер на `{base_url}`.") from None
+    except RuntimeError:
+        raise
+    except Exception as error:
+        logger.exception("Unexpected local llama.cpp SDK error")
+        raise RuntimeError("⚠️ **Неожиданная ошибка локальной модели llama.cpp.** Попробуй ещё раз чуть позже.") from error
 
 
 def call_api(
@@ -406,6 +550,8 @@ def call_api(
 ) -> str:
     validate_configuration()
     provider = get_provider()
+    if provider == "local":
+        return _call_local_api(system_prompt, messages, max_tokens=max_tokens)
     if provider == "claude":
         return _call_claude_api(system_prompt, messages, max_tokens=max_tokens)
     if provider == "gpt":

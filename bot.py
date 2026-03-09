@@ -14,7 +14,7 @@ BASE_DIR = Path(__file__).resolve().parent
 load_dotenv()
 logger = configure_logging(BASE_DIR)
 
-import ai_provider
+import ai_provider_runtime as ai_provider
 import database as db
 
 
@@ -24,7 +24,7 @@ def parse_args():
     )
     parser.add_argument(
         "--provider",
-        choices=("claude", "gpt"),
+        choices=("local", "claude", "gpt"),
         help="AI provider to use for the dungeon master.",
     )
     return parser.parse_args()
@@ -46,7 +46,7 @@ bot = commands.Bot(
     help_command=None,
 )
 bot.ai_provider = ai_provider.get_provider()
-bot.ai_model = ai_provider.get_model_name()
+bot.ai_model = None
 
 
 @bot.event
@@ -76,6 +76,8 @@ async def main():
 
     logger.info("Starting bot bootstrap")
     ai_provider.validate_configuration()
+    bot.ai_provider = ai_provider.get_provider()
+    bot.ai_model = ai_provider.get_model_name()
 
     async with bot:
         await bot.load_extension("cogs.character")

@@ -1,7 +1,7 @@
 ﻿import json
 import re
 
-import ai_provider
+import ai_provider_runtime as ai_provider
 import database as db
 import game_data
 
@@ -292,7 +292,7 @@ def get_system_prompt(campaign_id: int) -> str:
     )
     system_prompt = (
         OPENAI_SYSTEM_PROMPT
-        if ai_provider.get_provider() == "gpt"
+        if ai_provider.get_provider() in {"gpt", "local"}
         else CLAUDE_SYSTEM_PROMPT
     )
     return f"{system_prompt}\n\n---\n\n{dynamic_context}"

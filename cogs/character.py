@@ -9,7 +9,7 @@ from pathlib import Path
 import discord
 from discord.ext import commands
 
-import ai_provider
+import ai_provider_runtime as ai_provider
 import database as db
 import game_data
 import leveling

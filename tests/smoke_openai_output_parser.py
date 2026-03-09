@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from ai_provider import _extract_openai_output
+from ai_provider_runtime import _extract_openai_output
 
 
 def _response(output_text=None, output=None, request_id="req_test"):
