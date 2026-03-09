@@ -4,11 +4,16 @@ from datetime import datetime, timedelta
 import discord
 from discord.ext import commands
 
+import ai_provider_runtime as ai_provider
 import database as db
 import game_data
 import leveling
 
 _LEVELUP_TIMEOUT = timedelta(minutes=15)
+
+
+def _display_error(error: Exception) -> str:
+    return ai_provider.normalize_user_facing_text(str(error))
 
 
 class LevelingCog(commands.Cog):
@@ -72,7 +77,7 @@ class LevelingCog(commands.Cog):
         try:
             await self._apply_step_choice(ctx, campaign, char, session, step, value)
         except ValueError as error:
-            await ctx.send(str(error))
+            await ctx.send(_display_error(error))
             return
 
         session = db.get_active_levelup_session(campaign["id"])

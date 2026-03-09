@@ -18,6 +18,15 @@ ROUND_TIMEOUT_MINUTES = 5
 ROUND_TIMEOUT_GRACE_SECONDS = 10
 XP_AWARD_MAX = 50
 XP_AWARD_COOLDOWN_MINUTES = 20
+LIVE_STREAM_EDIT_INTERVAL_SECONDS = 0.8
+LIVE_STREAM_EDIT_CHAR_THRESHOLD = 120
+LIVE_STREAM_CHUNK_LIMIT = 1800
+LIVE_STREAM_PLACEHOLDER = "…"
+ROLL_REQUEST_START_RE = re.compile(r"\[ROLL_REQUEST\]", re.IGNORECASE)
+
+
+def _display_error(error: Exception) -> str:
+    return dm.ai_provider.normalize_user_facing_text(str(error))
 SETUP_ROLL_MODE_CHOICES = {
     "1": "bot_auto",
     "бот": "bot_auto",
@@ -70,7 +79,7 @@ INTRO_SETUP_STEPS = [
     {
         "status": "awaiting_intro_genre",
         "key": "genre",
-        "title": "🎭 Шаг 1: Жанр",
+        "title": "?? Шаг 1: Жанр",
         "prompt": (
             "Какой жанр хотите для кампании? Ответь одним сообщением.\n\n"
             "Примеры: `героическое фэнтези`, `тёмное фэнтези`, `авантюрное фэнтези с юмором`, "
@@ -80,7 +89,7 @@ INTRO_SETUP_STEPS = [
     {
         "status": "awaiting_intro_tone",
         "key": "tone",
-        "title": "🎚️ Шаг 2: Тональность",
+        "title": "??? Шаг 2: Тональность",
         "prompt": (
             "Какой тон игры вам нужен?\n\n"
             "Примеры: `лёгкий и приключенческий`, `умеренно серьёзный с юмором`, "
@@ -90,7 +99,7 @@ INTRO_SETUP_STEPS = [
     {
         "status": "awaiting_intro_include_themes",
         "key": "include_themes",
-        "title": "🧭 Шаг 3: Темы",
+        "title": "?? Шаг 3: Темы",
         "prompt": (
             "Какие темы и элементы хотите явно видеть в кампании?\n\n"
             "Примеры: `исследование руин, торговля, магические загадки`, "
@@ -100,7 +109,7 @@ INTRO_SETUP_STEPS = [
     {
         "status": "awaiting_intro_exclude_themes",
         "key": "exclude_themes",
-        "title": "🛡️ Шаг 4: Границы",
+        "title": "??? Шаг 4: Границы",
         "prompt": (
             "Что стоит исключить или сильно приглушить?\n\n"
             "Примеры: `без откровенной эротики`, `без жестоких пыток`, "
@@ -110,7 +119,7 @@ INTRO_SETUP_STEPS = [
     {
         "status": "awaiting_intro_lethality",
         "key": "lethality",
-        "title": "⚔️ Шаг 5: Опасность",
+        "title": "?? Шаг 5: Опасность",
         "prompt": (
             "Насколько суровыми должны быть последствия и летальность?\n\n"
             "Примеры: `низкая`, `умеренная`, `высокая`, "
@@ -120,7 +129,7 @@ INTRO_SETUP_STEPS = [
     {
         "status": "awaiting_intro_rules_mode",
         "key": "rules_mode",
-        "title": "📜 Шаг 6: Режим Правил",
+        "title": "?? Шаг 6: Режим Правил",
         "prompt": (
             "Как обращаться с правилами?\n\n"
             "Примеры: `строго по правилам`, `правила в основе, но с упрощением`, "
@@ -130,7 +139,7 @@ INTRO_SETUP_STEPS = [
     {
         "status": "awaiting_intro_setting",
         "key": "setting",
-        "title": "🌍 Шаг 7: Сеттинг",
+        "title": "?? Шаг 7: Сеттинг",
         "prompt": (
             "Какой мир или сеттинг хотите?\n\n"
             "Примеры: `оригинальный фэнтезийный мир`, `что-то в духе Forgotten Realms`, "
@@ -149,28 +158,28 @@ INLINE_ROLL_RE = re.compile(r"(?:бросок|roll)\s*[:=-]?\s*(\d{1,3})", re.IG
 MANUAL_TOTAL_RE = re.compile(r"^\s*(-?\d+)(?:\s+[A-Za-zА-Яа-яёЁ]+)?\s*$")
 DICE_NOTATION_RE = re.compile(r"^\s*(\d*)\s*[dдк](\d+)\s*$", re.IGNORECASE)
 AUTO_ROLL_REJECTION_REACTIONS = [
-    "🎲 Твой кубик бодро кувыркнулся в пустоту. В этой кампании судьбу официально подписывает только бот.",
-    "🧙 Местная магия недействительна для частных бросков. Здесь кубики игроков не имеют юридической силы.",
-    "🎪 Красивый бросок. Жаль, что в этой кампании он имеет примерно ту же власть, что чайная ложка на суде богов.",
-    "🏰 Кубик игрока стучится в ворота сюжета, но стража уже предупредила: вход только по броскам от бота.",
-    "📜 Летописец записал твой бросок в раздел 'уважительно проигнорировано'. На сюжет он не влияет.",
-    "⚖️ Судьба посмотрела на твой кубик, вздохнула и сказала: 'В этой кампании я работаю только через бота'.",
-    "🐉 Дракон впечатлён, но правила мира непреклонны: личные броски игроков здесь не двигают реальность.",
-    "🌫️ Кубик был брошен, услышан и торжественно не признан действительным на территории этой кампании.",
-    "🎭 Отличная импровизация с кубиком. Но сцена принимает только те броски, которые вызывает бот по ходу действия.",
-    "🔮 Твой кубик попытался вмешаться в судьбу героев, но пророчество уже оформлено через auto-режим бота.",
+    "?? Твой кубик бодро кувыркнулся в пустоту. В этой кампании судьбу официально подписывает только бот.",
+    "?? Местная магия недействительна для частных бросков. Здесь кубики игроков не имеют юридической силы.",
+    "?? Красивый бросок. Жаль, что в этой кампании он имеет примерно ту же власть, что чайная ложка на суде богов.",
+    "?? Кубик игрока стучится в ворота сюжета, но стража уже предупредила: вход только по броскам от бота.",
+    "?? Летописец записал твой бросок в раздел 'уважительно проигнорировано'. На сюжет он не влияет.",
+    "?? Судьба посмотрела на твой кубик, вздохнула и сказала: 'В этой кампании я работаю только через бота'.",
+    "?? Дракон впечатлён, но правила мира непреклонны: личные броски игроков здесь не двигают реальность.",
+    "??? Кубик был брошен, услышан и торжественно не признан действительным на территории этой кампании.",
+    "?? Отличная импровизация с кубиком. Но сцена принимает только те броски, которые вызывает бот по ходу действия.",
+    "?? Твой кубик попытался вмешаться в судьбу героев, но пророчество уже оформлено через auto-режим бота.",
 ]
 MANUAL_NO_PENDING_REACTIONS = [
-    "🎲 Кубик уже приготовился к прыжку, но бот шепчет: 'Сейчас бросок вообще не требуется'.",
-    "🧾 Заявка на бросок не найдена. Кубик может пока посидеть в зоне ожидания и подумать о вечном.",
-    "🧙 Бот не запрашивал бросок, так что этот кубик сейчас безработный, но очень перспективный.",
-    "🎯 Меткий бросок, но мимо бюрократии. Сначала нужен запрос от бота, потом уже судьба и математика.",
-    "📬 Для этого кубика сейчас нет официального приглашения. Бросок отклонён как слишком инициативный.",
-    "🎪 Кубик ворвался на сцену раньше своей реплики. Бот просит дождаться, когда бросок действительно понадобится.",
-    "🔔 Сейчас не тот момент, когда мир ждёт от тебя числа. Бот сначала должен попросить конкретный бросок.",
-    "🕰️ Твой кубик пришёл слишком рано. Здесь его принимают только по предварительной записи от бота.",
-    "📎 Броску не к чему прикрепиться: активного запроса нет. Попробуй сначала совершить действие.",
-    "🏹 Кубик натянул тетиву, но стрелять пока некуда. Бот ещё не просил никакой проверки.",
+    "?? Кубик уже приготовился к прыжку, но бот шепчет: 'Сейчас бросок вообще не требуется'.",
+    "?? Заявка на бросок не найдена. Кубик может пока посидеть в зоне ожидания и подумать о вечном.",
+    "?? Бот не запрашивал бросок, так что этот кубик сейчас безработный, но очень перспективный.",
+    "?? Меткий бросок, но мимо бюрократии. Сначала нужен запрос от бота, потом уже судьба и математика.",
+    "?? Для этого кубика сейчас нет официального приглашения. Бросок отклонён как слишком инициативный.",
+    "?? Кубик ворвался на сцену раньше своей реплики. Бот просит дождаться, когда бросок действительно понадобится.",
+    "?? Сейчас не тот момент, когда мир ждёт от тебя числа. Бот сначала должен попросить конкретный бросок.",
+    "??? Твой кубик пришёл слишком рано. Здесь его принимают только по предварительной записи от бота.",
+    "?? Броску не к чему прикрепиться: активного запроса нет. Попробуй сначала совершить действие.",
+    "?? Кубик натянул тетиву, но стрелять пока некуда. Бот ещё не просил никакой проверки.",
 ]
 
 
@@ -204,7 +213,7 @@ class GameCog(commands.Cog):
         existing = db.get_active_campaign(str(ctx.channel.id))
         if existing:
             await ctx.send(
-                f"⚠️ В этом канале уже идёт кампания **{existing['title']}**.\n"
+                f"?? В этом канале уже идёт кампания **{existing['title']}**.\n"
                 "Заверши её командой `!завершить_кампанию` перед началом новой."
             )
             return
@@ -216,7 +225,7 @@ class GameCog(commands.Cog):
             setup_owner_user_id=str(ctx.author.id),
         )
         embed = discord.Embed(
-            title=f"⚔️ Кампания «{title}» создана!",
+            title=f"?? Кампания «{title}» создана!",
             description=(
                 "Перед стартом выбери режим бросков для этой кампании.\n\n"
                 "**1. Бот бросает сам** - бот сам решает, когда нужен бросок, и сразу показывает результат.\n"
@@ -232,7 +241,7 @@ class GameCog(commands.Cog):
     async def start_game(self, ctx):
         campaign = db.get_active_campaign(str(ctx.channel.id))
         if not campaign:
-            await ctx.send("❌ Нет активной кампании. Используй `!новая_кампания`.")
+            await ctx.send("? Нет активной кампании. Используй `!новая_кампания`.")
             return
         if campaign.get("setup_status") != "ready":
             if not await self._ensure_campaign_ready(ctx, campaign):
@@ -240,7 +249,7 @@ class GameCog(commands.Cog):
 
         chars = db.get_all_characters(campaign["id"])
         if not chars:
-            await ctx.send("❌ Никто ещё не создал персонажа! Используй `!создать_персонажа`.")
+            await ctx.send("? Никто ещё не создал персонажа! Используй `!создать_персонажа`.")
             return
 
         if campaign.get("intro_status") != "completed":
@@ -256,11 +265,11 @@ class GameCog(commands.Cog):
             try:
                 intro = await dm.start_campaign(campaign["id"], campaign["title"])
             except RuntimeError as error:
-                await ctx.send(str(error))
+                await ctx.send(_display_error(error))
                 return
 
         names = ", ".join(f"**{char['name']}**" for char in chars)
-        await ctx.send(f"🎲 Участники: {names}")
+        await ctx.send(f"?? Участники: {names}")
         await self._publish_master_response(ctx.channel, campaign["id"], intro)
 
     @commands.command(name="завершить_кампанию", aliases=["зк"])
@@ -268,35 +277,35 @@ class GameCog(commands.Cog):
     async def end_campaign(self, ctx):
         campaign = db.get_active_campaign(str(ctx.channel.id))
         if not campaign:
-            await ctx.send("❌ Нет активной кампании.")
+            await ctx.send("? Нет активной кампании.")
             return
         db.end_campaign(campaign["id"])
-        await ctx.send(f"📕 Кампания **{campaign['title']}** завершена. История сохранена.")
+        await ctx.send(f"?? Кампания **{campaign['title']}** завершена. История сохранена.")
 
     @commands.command(name="таймер", aliases=["тм"])
     async def set_timer(self, ctx, minutes: int | None = None):
         campaign = db.get_active_campaign(str(ctx.channel.id))
         if not campaign:
-            await ctx.send("❌ Нет активной кампании.")
+            await ctx.send("? Нет активной кампании.")
             return
 
         if minutes is None:
             await ctx.send(
-                f"⏳ Таймер хода для кампании **{campaign['title']}**: {self._round_timeout_minutes(campaign)} мин."
+                f"? Таймер хода для кампании **{campaign['title']}**: {self._round_timeout_minutes(campaign)} мин."
             )
             return
 
         if not self._can_configure_campaign(ctx.author, ctx.channel):
-            await ctx.send("❌ Менять таймер может только модератор канала или владелец настройки кампании.")
+            await ctx.send("? Менять таймер может только модератор канала или владелец настройки кампании.")
             return
 
         if minutes < 1 or minutes > 120:
-            await ctx.send("❌ Таймер должен быть от 1 до 120 минут.")
+            await ctx.send("? Таймер должен быть от 1 до 120 минут.")
             return
 
         campaign = db.set_campaign_scene_round_timeout(campaign["id"], minutes)
         await ctx.send(
-            f"✅ Таймер хода для кампании **{campaign['title']}** установлен на {campaign['scene_round_timeout_minutes']} мин."
+            f"? Таймер хода для кампании **{campaign['title']}** установлен на {campaign['scene_round_timeout_minutes']} мин."
             " Изменение применяется к новым раундам."
         )
 
@@ -304,13 +313,13 @@ class GameCog(commands.Cog):
     async def set_story_pressure(self, ctx, *, mode: str | None = None):
         campaign = db.get_active_campaign(str(ctx.channel.id))
         if not campaign:
-            await ctx.send("❌ Нет активной кампании.")
+            await ctx.send("? Нет активной кампании.")
             return
 
         current_mode = campaign.get("main_quest_pressure") or "soft"
         if mode is None:
             await ctx.send(
-                f"🧭 Давление главного сюжета для кампании **{campaign['title']}**: "
+                f"?? Давление главного сюжета для кампании **{campaign['title']}**: "
                 f"**{MAIN_QUEST_PRESSURE_LABELS.get(current_mode, 'мягко')}**.\n"
                 f"{MAIN_QUEST_PRESSURE_DESCRIPTIONS.get(current_mode, MAIN_QUEST_PRESSURE_DESCRIPTIONS['soft'])}"
             )
@@ -318,7 +327,7 @@ class GameCog(commands.Cog):
 
         if not self._can_configure_campaign(ctx.author, ctx.channel):
             await ctx.send(
-                "❌ Менять давление сюжета может только модератор канала или владелец настройки кампании."
+                "? Менять давление сюжета может только модератор канала или владелец настройки кампании."
             )
             return
 
@@ -326,12 +335,12 @@ class GameCog(commands.Cog):
             re.sub(r"\s+", "", mode.strip().lower()).replace("ё", "е")
         )
         if normalized is None:
-            await ctx.send("❌ Используй один из режимов: `редко`, `мягко`, `жестко`.")
+            await ctx.send("? Используй один из режимов: `редко`, `мягко`, `жестко`.")
             return
 
         campaign = db.set_campaign_main_quest_pressure(campaign["id"], normalized)
         await ctx.send(
-            f"✅ Давление главного сюжета для кампании **{campaign['title']}** установлено на "
+            f"? Давление главного сюжета для кампании **{campaign['title']}** установлено на "
             f"**{MAIN_QUEST_PRESSURE_LABELS[normalized]}**.\n"
             f"{MAIN_QUEST_PRESSURE_DESCRIPTIONS[normalized]}"
         )
@@ -342,7 +351,7 @@ class GameCog(commands.Cog):
     async def action(self, ctx, *, text: str):
         campaign = db.get_active_campaign(str(ctx.channel.id))
         if not campaign:
-            await ctx.send("❌ Нет активной кампании.")
+            await ctx.send("? Нет активной кампании.")
             return
         if not await self._ensure_campaign_ready(ctx, campaign):
             return
@@ -352,14 +361,14 @@ class GameCog(commands.Cog):
             pending = db.get_open_pending_roll_request(campaign["id"], str(ctx.author.id))
             if pending and pending.get("round_id") == active_round["id"]:
                 await ctx.send(
-                    "🎲 На твой ход уже запрошен бросок. Пришли итог числом через `!бросок 17` "
+                    "?? На твой ход уже запрошен бросок. Пришли итог числом через `!бросок 17` "
                     "или ответь реплаем с пометкой вроде `(бросок 17)`."
                 )
                 return
 
             target = db.get_scene_round_target(active_round["id"], str(ctx.author.id))
             if not target:
-                await ctx.send("❌ Твой персонаж не участвует в текущем раунде выбора.")
+                await ctx.send("? Твой персонаж не участвует в текущем раунде выбора.")
                 return
             round_input_error = self._get_round_input_restriction(active_round, target, ctx.message.created_at)
             if round_input_error:
@@ -367,7 +376,7 @@ class GameCog(commands.Cog):
                 return
             if target["status"] == "out_of_scene":
                 await ctx.send(
-                    f"🧭 **{target['character_name_snapshot']}** сейчас вне этой сцены, "
+                    f"?? **{target['character_name_snapshot']}** сейчас вне этой сцены, "
                     "поэтому действие не влияет на текущий эпизод."
                 )
                 return
@@ -382,14 +391,14 @@ class GameCog(commands.Cog):
                     text,
                 )
             except ValueError:
-                await ctx.send("⌛ Этот раунд уже закрыт. Дождись следующего ответа Мастера.")
+                await ctx.send("? Этот раунд уже закрыт. Дождись следующего ответа Мастера.")
                 return
             if parsed["response_kind"] == "option":
                 await ctx.send(
-                    f"✅ Ход для **{char_name}** принят как вариант **{parsed['selected_option']}**."
+                    f"? Ход для **{char_name}** принят как вариант **{parsed['selected_option']}**."
                 )
             else:
-                await ctx.send(f"✅ Ход для **{char_name}** принят.")
+                await ctx.send(f"? Ход для **{char_name}** принят.")
             await self._maybe_resolve_if_complete(active_round["id"], ctx.channel)
             return
 
@@ -436,7 +445,7 @@ class GameCog(commands.Cog):
             dice_spec = self._parse_dice_notation(dice)
             if not dice_spec:
                 await ctx.send(
-                    "❌ Для запроса от бота используй `!бросок d20`, `!бросок д20`, `!бросок 2д6` "
+                    "? Для запроса от бота используй `!бросок d20`, `!бросок д20`, `!бросок 2д6` "
                     "или передай готовый итог числом: `!бросок 17`."
                 )
                 return
@@ -446,7 +455,7 @@ class GameCog(commands.Cog):
                 or dice_spec["sides"] != pending["dice_sides"]
             ):
                 await ctx.send(
-                    f"❌ Сейчас нужен бросок {self._format_roll_notation(pending['dice_count'], pending['dice_sides'], None)}. "
+                    f"? Сейчас нужен бросок {self._format_roll_notation(pending['dice_count'], pending['dice_sides'], None)}. "
                     "Этот бросок не засчитан."
                 )
                 return
@@ -473,7 +482,7 @@ class GameCog(commands.Cog):
 
         dice_spec = self._parse_dice_notation(dice)
         if not dice_spec:
-            await ctx.send("❌ Формат: `!бросок d20`, `!бросок д20`, `!бросок к20` или `!бросок 2d6`")
+            await ctx.send("? Формат: `!бросок d20`, `!бросок д20`, `!бросок к20` или `!бросок 2d6`")
             return
 
         char = db.get_character(str(ctx.author.id), campaign["id"]) if campaign else None
@@ -487,17 +496,17 @@ class GameCog(commands.Cog):
     async def turn_status(self, ctx):
         campaign = db.get_active_campaign(str(ctx.channel.id))
         if not campaign:
-            await ctx.send("❌ Нет активной кампании.")
+            await ctx.send("? Нет активной кампании.")
             return
 
         runtime = db.get_campaign_runtime_state(campaign["id"])
         active_round = db.get_active_scene_round(campaign["id"])
         if not active_round:
             if runtime["auto_wait_enabled"]:
-                await ctx.send("🕊️ Сейчас нет активного окна выбора. Можно продолжать игру обычными действиями.")
+                await ctx.send("??? Сейчас нет активного окна выбора. Можно продолжать игру обычными действиями.")
             else:
                 await ctx.send(
-                    "⏸️ Автоматическое ожидание остановлено после двух пустых раундов подряд. "
+                    "?? Автоматическое ожидание остановлено после двух пустых раундов подряд. "
                     "Используй `!продолжить_игру`, чтобы снова включить авто-ожидание."
                 )
             return
@@ -507,7 +516,7 @@ class GameCog(commands.Cog):
             if item.get("round_id") == active_round["id"]
         }
         lines = [
-            "⏳ **Активный раунд выбора**",
+            "? **Активный раунд выбора**",
             f"Дедлайн: {self._format_deadline(active_round['deadline_at'])}",
             f"Таймер хода: {self._round_timeout_minutes(campaign)} мин.",
             f"Авто-ожидание: {'включено' if runtime['auto_wait_enabled'] else 'остановлено'}",
@@ -544,26 +553,26 @@ class GameCog(commands.Cog):
     async def skip_turn(self, ctx):
         campaign = db.get_active_campaign(str(ctx.channel.id))
         if not campaign:
-            await ctx.send("❌ Нет активной кампании.")
+            await ctx.send("? Нет активной кампании.")
             return
         if not await self._ensure_campaign_ready(ctx, campaign):
             return
 
         active_round = db.get_active_scene_round(campaign["id"])
         if not active_round:
-            await ctx.send("❌ Сейчас нет активного окна выбора.")
+            await ctx.send("? Сейчас нет активного окна выбора.")
             return
 
         target = db.get_scene_round_target(active_round["id"], str(ctx.author.id))
         if not target:
-            await ctx.send("❌ Твой персонаж не участвует в текущем раунде.")
+            await ctx.send("? Твой персонаж не участвует в текущем раунде.")
             return
         round_input_error = self._get_round_input_restriction(active_round, target, ctx.message.created_at)
         if round_input_error:
             await ctx.send(round_input_error)
             return
         if target["status"] == "out_of_scene":
-            await ctx.send("ℹ️ Твой персонаж сейчас вне сцены и не влияет на этот эпизод.")
+            await ctx.send("?? Твой персонаж сейчас вне сцены и не влияет на этот эпизод.")
             return
 
         db.cancel_open_pending_roll_requests(campaign["id"], str(ctx.author.id))
@@ -574,7 +583,7 @@ class GameCog(commands.Cog):
             "free_text",
             "[Пропускает ход и не вмешивается]",
         )
-        await ctx.send(f"⏭️ Ход для **{target['character_name_snapshot']}** помечен как пропуск.")
+        await ctx.send(f"?? Ход для **{target['character_name_snapshot']}** помечен как пропуск.")
         await self._maybe_resolve_if_complete(active_round["id"], ctx.channel)
 
     @commands.command(name="закрыть_ход", aliases=["зх"])
@@ -582,14 +591,14 @@ class GameCog(commands.Cog):
     async def close_turn(self, ctx):
         campaign = db.get_active_campaign(str(ctx.channel.id))
         if not campaign:
-            await ctx.send("❌ Нет активной кампании.")
+            await ctx.send("? Нет активной кампании.")
             return
         if not await self._ensure_campaign_ready(ctx, campaign):
             return
 
         active_round = db.get_active_scene_round(campaign["id"])
         if not active_round:
-            await ctx.send("❌ Сейчас нет активного окна выбора.")
+            await ctx.send("? Сейчас нет активного окна выбора.")
             return
 
         await self._resolve_round(active_round["id"], ctx.channel, timed_out=True)
@@ -598,7 +607,7 @@ class GameCog(commands.Cog):
     async def continue_game(self, ctx):
         campaign = db.get_active_campaign(str(ctx.channel.id))
         if not campaign:
-            await ctx.send("❌ Нет активной кампании.")
+            await ctx.send("? Нет активной кампании.")
             return
         if not await self._ensure_campaign_ready(ctx, campaign):
             return
@@ -606,11 +615,11 @@ class GameCog(commands.Cog):
         runtime = db.resume_campaign_auto_wait(campaign["id"])
         if runtime["auto_wait_enabled"]:
             await ctx.send(
-                "▶️ Автоматическое ожидание снова включено. "
+                "?? Автоматическое ожидание снова включено. "
                 "Следующий ответ Мастера с вариантами откроет новый раунд."
             )
         else:
-            await ctx.send("⚠️ Не удалось включить автоматическое ожидание.")
+            await ctx.send("?? Не удалось включить автоматическое ожидание.")
 
     # History
 
@@ -618,19 +627,19 @@ class GameCog(commands.Cog):
     async def story_summary(self, ctx):
         campaign = db.get_active_campaign(str(ctx.channel.id))
         if not campaign:
-            await ctx.send("❌ Нет активной кампании.")
+            await ctx.send("? Нет активной кампании.")
             return
 
-        await ctx.send("📖 Составляю хронику приключений...")
+        await ctx.send("?? Составляю хронику приключений...")
         async with ctx.typing():
             try:
                 summary = await dm.get_summary(campaign["id"])
             except RuntimeError as error:
-                await ctx.send(str(error))
+                await ctx.send(_display_error(error))
                 return
 
         embed = discord.Embed(
-            title=f"📜 История кампании «{campaign['title']}»",
+            title=f"?? История кампании «{campaign['title']}»",
             description=summary,
             color=0x8B4513,
         )
@@ -642,20 +651,20 @@ class GameCog(commands.Cog):
     async def show_players(self, ctx):
         campaign = db.get_active_campaign(str(ctx.channel.id))
         if not campaign:
-            await ctx.send("❌ Нет активной кампании.")
+            await ctx.send("? Нет активной кампании.")
             return
 
         chars = db.get_all_characters(campaign["id"])
         if not chars:
-            await ctx.send("😶 В кампании пока нет персонажей.")
+            await ctx.send("?? В кампании пока нет персонажей.")
             return
 
-        embed = discord.Embed(title=f"⚔️ Партия - {campaign['title']}", color=0x7B68EE)
+        embed = discord.Embed(title=f"?? Партия - {campaign['title']}", color=0x7B68EE)
         for char in chars:
-            hp_bar = "█" * round((char["hp"] / char["max_hp"]) * 10) + "░" * (10 - round((char["hp"] / char["max_hp"]) * 10))
+            hp_bar = "-" * round((char["hp"] / char["max_hp"]) * 10) + "-" * (10 - round((char["hp"] / char["max_hp"]) * 10))
             embed.add_field(
                 name=f"{char['name']} ({game_data.get_character_archetype_text(char['race'], char['class'], subrace_key=char.get('subrace'), subclass_key=char.get('subclass'))})",
-                value=f"❤️ `{hp_bar}` {char['hp']}/{char['max_hp']} HP  |  ⭐ Ур.{char['level']}  |  💰 {char['gold']}",
+                value=f"?? `{hp_bar}` {char['hp']}/{char['max_hp']} HP  |  ? Ур.{char['level']}  |  ?? {char['gold']}",
                 inline=False,
             )
         await ctx.send(embed=embed)
@@ -665,12 +674,12 @@ class GameCog(commands.Cog):
         # Keep this help text in sync with public bot commands and aliases.
         sections = [
             (
-                "📚 Команды D&D бота",
+                "?? Команды D&D бота",
                 "Команды вызываются с префиксом `!`. Короткие алиасы указаны рядом, когда они есть.",
                 0x5865F2,
             ),
             (
-                "🗺️ Кампания",
+                "??? Кампания",
                 "`!новая_кампания [название]` / `!старт` / `!нк` - создать кампанию и запустить настройку\n"
                 "`!начать_игру` / `!ни` - продолжить настройку вступления или стартовать игру\n"
                 "`!завершить_кампанию` / `!зк` - завершить текущую кампанию\n"
@@ -679,7 +688,7 @@ class GameCog(commands.Cog):
                 0x5865F2,
             ),
             (
-                "🧙 Персонаж",
+                "?? Персонаж",
                 "`!создать_персонажа` / `!сп` / `!нп` - начать создание персонажа\n"
                 "`!раса <раса>` / `!р` - выбрать расу\n"
                 "`!подраса <подраса>` / `!пр` - выбрать подрасу, если она есть\n"
@@ -694,7 +703,7 @@ class GameCog(commands.Cog):
                 0x5865F2,
             ),
             (
-                "🎲 Игра",
+                "?? Игра",
                 "`!д <действие>` / `!действие` - отправить действие персонажа мастеру\n"
                 "`!бросок [d20|2d6|17]` / `!кубик` / `!бр` - сделать бросок или отправить итог\n"
                 "`!статус_хода` / `!сх` - показать текущее окно выбора и статусы игроков\n"
@@ -706,7 +715,7 @@ class GameCog(commands.Cog):
                 0x5865F2,
             ),
             (
-                "🎒 Прогресс и ресурсы",
+                "?? Прогресс и ресурсы",
                 "`!уровень` / `!лвл` / `!опыт` - показать XP и статус прогресса\n"
                 "`!левелап` / `!уровень_ап` / `!лу` - начать повышение уровня\n"
                 "`!выбрать <вариант>` / `!выб` - выбрать опцию в активном левелапе\n"
@@ -758,7 +767,7 @@ class GameCog(commands.Cog):
             return
         if campaign.get("setup_status") != "ready":
             await message.reply(
-                "⚙️ Сначала заверши настройку кампании: выбери режим бросков, а затем режим прироста HP.",
+                "?? Сначала заверши настройку кампании: выбери режим бросков, а затем режим прироста HP.",
                 mention_author=False,
             )
             return
@@ -766,7 +775,7 @@ class GameCog(commands.Cog):
             if self._is_character_creation_message(message):
                 return
             await message.reply(
-                "🎬 Сначала заверши пошаговую настройку вступления через текущий вопрос мастера.",
+                "?? Сначала заверши пошаговую настройку вступления через текущий вопрос мастера.",
                 mention_author=False,
             )
             return
@@ -795,7 +804,7 @@ class GameCog(commands.Cog):
                 message.author.display_name,
             )
             await message.reply(
-                f"🧭 **{target['character_name_snapshot']}** сейчас вне этой сцены, "
+                f"?? **{target['character_name_snapshot']}** сейчас вне этой сцены, "
                 "поэтому действие не влияет на текущий эпизод.",
                 mention_author=False,
             )
@@ -814,19 +823,19 @@ class GameCog(commands.Cog):
             return True
         if campaign.get("setup_status") == "awaiting_roll_mode":
             await ctx.send(
-                "⚙️ Кампания ещё не настроена. Ответь `1` или `2` на сообщение о выборе режима бросков."
+                "?? Кампания ещё не настроена. Ответь `1` или `2` на сообщение о выборе режима бросков."
             )
             return False
         if campaign.get("setup_status") != "ready":
             await ctx.send(
-                "⚙️ Кампания ещё не настроена. Ответь `1`, `2` или `3` на сообщение о выборе режима прироста HP."
+                "?? Кампания ещё не настроена. Ответь `1`, `2` или `3` на сообщение о выборе режима прироста HP."
             )
             return False
         if campaign.get("intro_status") == "generating_intro":
-            await ctx.send("🎬 Вступление уже генерируется. Подожди ещё немного.")
+            await ctx.send("?? Вступление уже генерируется. Подожди ещё немного.")
             return False
         await ctx.send(
-            "🎬 Перед началом игры нужно пройти пошаговую настройку вступления. Используй `!начать_игру` и ответь на вопросы по одному."
+            "?? Перед началом игры нужно пройти пошаговую настройку вступления. Используй `!начать_игру` и ответь на вопросы по одному."
         )
         return False
 
@@ -838,7 +847,7 @@ class GameCog(commands.Cog):
         if intro_status == "not_started":
             campaign = db.set_campaign_intro_state(campaign["id"], INTRO_SETUP_STEPS[0]["status"], {})
             await channel.send(
-                "🎬 Перед вступлением настроим кампанию по шагам. Я задам несколько коротких вопросов по одному сообщению."
+                "?? Перед вступлением настроим кампанию по шагам. Я задам несколько коротких вопросов по одному сообщению."
             )
             await self._send_intro_setup_prompt(channel, campaign)
             return
@@ -848,10 +857,10 @@ class GameCog(commands.Cog):
             return
 
         if intro_status == "generating_intro":
-            await channel.send("🎬 Вступление уже генерируется. Подожди ещё немного.")
+            await channel.send("?? Вступление уже генерируется. Подожди ещё немного.")
             return
 
-        await channel.send("🎬 Продолжаем пошаговую настройку вступления.")
+        await channel.send("?? Продолжаем пошаговую настройку вступления.")
         await self._send_intro_setup_prompt(channel, campaign)
 
     async def _send_intro_setup_prompt(self, channel, campaign: dict):
@@ -875,7 +884,7 @@ class GameCog(commands.Cog):
         answers[step["key"]] = content
         next_status = INTRO_NEXT_STATUS.get(step["status"])
 
-        await message.channel.send(f"✅ {step['title'].split(':', 1)[-1].strip()} сохранён.")
+        await message.channel.send(f"? {step['title'].split(':', 1)[-1].strip()} сохранён.")
         if next_status:
             campaign = db.set_campaign_intro_state(campaign["id"], next_status, answers)
             await self._send_intro_setup_prompt(message.channel, campaign)
@@ -888,19 +897,19 @@ class GameCog(commands.Cog):
     async def _generate_intro_from_answers(self, channel, campaign: dict):
         answers = dict(campaign.get("intro_answers") or {})
         campaign = db.set_campaign_intro_state(campaign["id"], "generating_intro", answers)
-        await channel.send("🎬 Настройки сохранены. Начинаю вступление кампании.")
+        await channel.send("?? Настройки сохранены. Начинаю вступление кампании.")
 
         chars = db.get_all_characters(campaign["id"])
         if chars:
             names = ", ".join(f"**{char['name']}**" for char in chars)
-            await channel.send(f"🎲 Участники: {names}")
+            await channel.send(f"?? Участники: {names}")
 
         async with channel.typing():
             try:
                 intro = await dm.start_campaign(campaign["id"], campaign["title"], answers)
             except RuntimeError as error:
                 db.set_campaign_intro_state(campaign["id"], "intro_ready_to_generate", answers)
-                await channel.send(str(error))
+                await channel.send(_display_error(error))
                 return
 
         db.set_campaign_intro_state(campaign["id"], "completed", answers)
@@ -921,7 +930,7 @@ class GameCog(commands.Cog):
             else "Игроки будут сами присылать результаты бросков, когда бот явно запросит проверку."
         )
         await message.channel.send(
-            f"✅ Режим бросков для кампании **{campaign['title']}** сохранён.\n{mode_text}\n\n"
+            f"? Режим бросков для кампании **{campaign['title']}** сохранён.\n{mode_text}\n\n"
             "Теперь выбери режим прироста HP при повышении уровня:\n"
             "**1. Fixed** - всегда брать фиксированное значение Hit Die\n"
             "**2. Roll** - всегда бросать Hit Die\n"
@@ -944,7 +953,7 @@ class GameCog(commands.Cog):
             "choose_each_level": "На каждом уровне игрок сможет сам выбрать fixed или roll для прироста HP.",
         }[normalized]
         await message.channel.send(
-            f"✅ Настройка кампании **{campaign['title']}** завершена.\n{hp_text}\n\n"
+            f"? Настройка кампании **{campaign['title']}** завершена.\n{hp_text}\n\n"
             "Теперь игроки могут создавать персонажей, а затем запускай приключение через `!начать_игру`."
         )
         return True
@@ -954,23 +963,38 @@ class GameCog(commands.Cog):
         username = author.display_name
         char = db.get_character(user_id, campaign["id"])
         char_name = char["name"] if char else author.display_name
-        async with channel.typing():
+        if self._should_stream_local():
             try:
-                response = await dm.process_action(
+                streamed = await self._stream_master_response(
+                    channel,
                     campaign["id"],
-                    user_id,
-                    username,
-                    text,
+                    dm.stream_action(campaign["id"], user_id, username, text),
+                    operation="action",
                 )
             except RuntimeError as error:
-                await channel.send(str(error))
+                await channel.send(_display_error(error))
                 return
+            response = streamed["full_text"]
+            roll_request = streamed["roll_request"]
+            visible_text = streamed["visible_text"]
+        else:
+            async with channel.typing():
+                try:
+                    response = await dm.process_action(
+                        campaign["id"],
+                        user_id,
+                        username,
+                        text,
+                    )
+                except RuntimeError as error:
+                    await channel.send(_display_error(error))
+                    return
 
-        parsed_response = dm.extract_roll_request(response)
-        roll_request = parsed_response["roll_request"]
-        visible_text = parsed_response["text"]
+            parsed_response = dm.extract_roll_request(response)
+            roll_request = parsed_response["roll_request"]
+            visible_text = parsed_response["text"]
         if roll_request:
-            if visible_text:
+            if visible_text and not self._should_stream_local():
                 await _send_long(channel, visible_text)
             pending = db.create_pending_roll_request(
                 campaign["id"],
@@ -1012,9 +1036,9 @@ class GameCog(commands.Cog):
                 content,
             )
         except ValueError:
-            await message.reply("⌛ Этот раунд уже закрыт. Дождись следующего ответа Мастера.", mention_author=False)
+            await message.reply("? Этот раунд уже закрыт. Дождись следующего ответа Мастера.", mention_author=False)
             return
-        await message.reply(f"✅ Ход для **{char_name}** принят.", mention_author=False)
+        await message.reply(f"? Ход для **{char_name}** принят.", mention_author=False)
         await self._maybe_resolve_if_complete(active_round["id"], message.channel)
 
     async def _resolve_pending_roll_request(
@@ -1056,7 +1080,7 @@ class GameCog(commands.Cog):
             round_data = db.get_scene_round(pending["round_id"])
             if not round_data or round_data["status"] != "open":
                 db.resolve_pending_roll_request(pending["id"])
-                await channel.send("⌛ Этот запрос на бросок уже устарел - раунд завершён.")
+                await channel.send("? Этот запрос на бросок уже устарел - раунд завершён.")
                 return
 
             selected_option = self._selected_option_for_action(round_data["options"], pending["action_text"])
@@ -1070,13 +1094,56 @@ class GameCog(commands.Cog):
                 enriched_action,
                 selected_option=selected_option,
             )
-            await channel.send(f"{summary}\n✅ Ход для **{char_name}** дополнен броском и принят.")
+            await channel.send(f"{summary}\n? Ход для **{char_name}** дополнен броском и принят.")
             await self._maybe_resolve_if_complete(round_data["id"], channel)
             return
 
         db.resolve_pending_roll_request(pending["id"])
         db.resume_campaign_auto_wait(campaign["id"])
         await channel.send(summary)
+        if self._should_stream_local():
+            try:
+                streamed = await self._stream_master_response(
+                    channel,
+                    campaign["id"],
+                    dm.stream_action(campaign["id"], user_id, author.display_name, enriched_action),
+                    operation="action",
+                )
+            except RuntimeError as error:
+                await channel.send(_display_error(error))
+                return
+            response = streamed["full_text"]
+            roll_request = streamed["roll_request"]
+            visible_text = streamed["visible_text"]
+            if roll_request:
+                pending = db.create_pending_roll_request(
+                    campaign["id"],
+                    user_id,
+                    char_name,
+                    enriched_action,
+                    source_message_id,
+                    roll_request["dice_count"],
+                    roll_request["dice_sides"],
+                    roll_request.get("modifier_stat"),
+                    roll_request.get("reason"),
+                )
+                if campaign.get("roll_mode") == "bot_auto":
+                    roll_data = self._perform_auto_roll(char, char_name, roll_request)
+                    await self._resolve_pending_roll_request(
+                        channel,
+                        campaign,
+                        author,
+                        pending,
+                        roll_data["total"],
+                        source_message_id,
+                        performed_by_bot=True,
+                    )
+                    return
+                await channel.send(self._format_pending_roll_prompt(pending))
+                return
+            await self._after_master_response(channel, campaign["id"], visible_text or response, streamed["source_message_id"])
+            return
+
         async with channel.typing():
             try:
                 response = await dm.process_action(
@@ -1086,15 +1153,127 @@ class GameCog(commands.Cog):
                     enriched_action,
                 )
             except RuntimeError as error:
-                await channel.send(str(error))
+                await channel.send(_display_error(error))
                 return
         await self._publish_master_response(channel, campaign["id"], response)
+
+    def _should_stream_local(self) -> bool:
+        return dm.ai_provider.supports_streaming()
+
+    async def _after_master_response(self, channel, campaign_id: int, text: str, source_message_id: str | None):
+        await self._maybe_open_round(channel, campaign_id, text)
+        await self._maybe_award_xp(channel, campaign_id, text, source_message_id)
 
     async def _publish_master_response(self, channel, campaign_id: int, text: str):
         sent_messages = await _send_long(channel, text)
         source_message_id = str(sent_messages[0].id) if sent_messages else None
-        await self._maybe_award_xp(channel, campaign_id, text, source_message_id)
-        await self._maybe_open_round(channel, campaign_id, text)
+        await self._after_master_response(channel, campaign_id, text, source_message_id)
+
+    async def _sync_stream_messages(self, channel, state: dict, text: str):
+        desired_chunks = _split_message_chunks(text, limit=LIVE_STREAM_CHUNK_LIMIT)
+        if not desired_chunks:
+            desired_chunks = [LIVE_STREAM_PLACEHOLDER]
+
+        messages = state["messages"]
+        chunk_texts = state["chunk_texts"]
+
+        for index, chunk in enumerate(desired_chunks):
+            if index < len(messages):
+                if chunk_texts[index] != chunk:
+                    await messages[index].edit(content=chunk)
+                    chunk_texts[index] = chunk
+            else:
+                messages.append(await channel.send(chunk))
+                chunk_texts.append(chunk)
+
+        while len(messages) > len(desired_chunks):
+            message = messages.pop()
+            chunk_texts.pop()
+            try:
+                await message.delete()
+            except discord.HTTPException:
+                pass
+
+    async def _delete_stream_messages(self, state: dict):
+        while state["messages"]:
+            message = state["messages"].pop()
+            state["chunk_texts"].pop()
+            try:
+                await message.delete()
+            except discord.HTTPException:
+                pass
+
+    async def _stream_master_response(self, channel, campaign_id: int, response_stream, operation: str):
+        state = {
+            "messages": [await channel.send(LIVE_STREAM_PLACEHOLDER)],
+            "chunk_texts": [LIVE_STREAM_PLACEHOLDER],
+            "last_edit_at": 0.0,
+            "last_visible_len": 0,
+            "started_at": asyncio.get_running_loop().time(),
+            "first_edit_logged": False,
+        }
+        final_event = None
+        current_text = ""
+
+        try:
+            async for event in response_stream:
+                current_text = event["text"]
+                if event.get("done"):
+                    final_event = event
+                    break
+
+                visible_text = _visible_stream_text(current_text)
+                now = asyncio.get_running_loop().time()
+                grown_by = max(0, len(visible_text) - state["last_visible_len"])
+                should_edit = (
+                    visible_text
+                    and (
+                        grown_by >= LIVE_STREAM_EDIT_CHAR_THRESHOLD
+                        or now - state["last_edit_at"] >= LIVE_STREAM_EDIT_INTERVAL_SECONDS
+                    )
+                )
+                if not should_edit:
+                    continue
+
+                await self._sync_stream_messages(channel, state, visible_text)
+                state["last_edit_at"] = now
+                state["last_visible_len"] = len(visible_text)
+                if not state["first_edit_logged"]:
+                    logger.info(
+                        "Discord first edit. operation=%s campaign_id=%s delay_ms=%s",
+                        operation,
+                        campaign_id,
+                        int((now - state["started_at"]) * 1000),
+                    )
+                    state["first_edit_logged"] = True
+
+            if final_event is None:
+                final_event = {"text": current_text, "done": True}
+
+            parsed_response = dm.extract_roll_request(final_event["text"])
+            visible_text = parsed_response["text"]
+            if visible_text:
+                await self._sync_stream_messages(channel, state, visible_text)
+            else:
+                await self._delete_stream_messages(state)
+
+            logger.info(
+                "Discord final sync. operation=%s campaign_id=%s chars=%s messages=%s",
+                operation,
+                campaign_id,
+                len(visible_text),
+                len(state["messages"]),
+            )
+            return {
+                "full_text": final_event["text"],
+                "visible_text": visible_text,
+                "roll_request": parsed_response["roll_request"],
+                "sent_messages": list(state["messages"]),
+                "source_message_id": str(state["messages"][0].id) if state["messages"] else None,
+            }
+        except Exception:
+            await self._delete_stream_messages(state)
+            raise
 
     async def _maybe_award_xp(self, channel, campaign_id: int, assistant_text: str, source_message_id: str | None):
         if not source_message_id:
@@ -1137,7 +1316,7 @@ class GameCog(commands.Cog):
             if progress["eligible_level"] > int(updated["level"]):
                 queue_entry = db.enqueue_levelup(campaign_id, updated["user_id"], updated["name"], progress["eligible_level"])
                 notices.append(
-                    f"⬆️ **{updated['name']}** готов к повышению и добавлен в очередь до уровня {queue_entry['target_level']}."
+                    f"?? **{updated['name']}** готов к повышению и добавлен в очередь до уровня {queue_entry['target_level']}."
                 )
 
         if not awarded:
@@ -1152,7 +1331,7 @@ class GameCog(commands.Cog):
             awarded,
         )
         summary = ", ".join(f"**{item['name']}** +{item['amount']} XP" for item in awarded)
-        message = f"✨ XP: {summary}."
+        message = f"? XP: {summary}."
         if analysis.get("reason"):
             message += f" {analysis['reason']}"
         if notices:
@@ -1170,7 +1349,7 @@ class GameCog(commands.Cog):
         runtime = db.get_campaign_runtime_state(campaign_id)
         if not runtime["auto_wait_enabled"]:
             await channel.send(
-                "⏸️ Автоматическое ожидание остановлено после двух пустых раундов подряд. "
+                "?? Автоматическое ожидание остановлено после двух пустых раундов подряд. "
                 "Используй `!продолжить_игру`, чтобы снова включить авто-ожидание."
             )
             return
@@ -1206,7 +1385,7 @@ class GameCog(commands.Cog):
 
         if expected_count == 0:
             await channel.send(
-                "🎭 Сейчас в этой сцене нет персонажей, от которых нужен обязательный ответ. "
+                "?? Сейчас в этой сцене нет персонажей, от которых нужен обязательный ответ. "
                 "Продолжайте игру новым явным действием."
             )
             return
@@ -1261,28 +1440,46 @@ class GameCog(commands.Cog):
                 await self._update_round_prompt_message(
                     channel,
                     round_data,
-                    "⌛ Дедлайн истёк. Ответов не было."
+                    "? Дедлайн истёк. Ответов не было."
                 )
                 if not runtime["auto_wait_enabled"]:
                     if channel:
                         await channel.send(
-                            "⏸️ Два раунда подряд прошли без ответов. "
+                            "?? Два раунда подряд прошли без ответов. "
                             "Автоматическое ожидание остановлено. Используй `!продолжить_игру`, когда будете готовы продолжать."
                         )
                     return
                 if channel:
-                    async with channel.typing():
+                    if self._should_stream_local():
                         try:
-                            response = await dm.process_scene_round(round_data["campaign_id"], round_id)
+                            streamed = await self._stream_master_response(
+                                channel,
+                                round_data["campaign_id"],
+                                dm.stream_scene_round(round_data["campaign_id"], round_id),
+                                operation="scene_round",
+                            )
                         except RuntimeError as error:
-                            await channel.send(str(error))
+                            await channel.send(_display_error(error))
                             return
-                    parsed_response = dm.extract_roll_request(response)
-                    await self._publish_master_response(
-                        channel,
-                        round_data["campaign_id"],
-                        parsed_response["text"] or response,
-                    )
+                        await self._after_master_response(
+                            channel,
+                            round_data["campaign_id"],
+                            streamed["visible_text"] or streamed["full_text"],
+                            streamed["source_message_id"],
+                        )
+                    else:
+                        async with channel.typing():
+                            try:
+                                response = await dm.process_scene_round(round_data["campaign_id"], round_id)
+                            except RuntimeError as error:
+                                await channel.send(_display_error(error))
+                                return
+                        parsed_response = dm.extract_roll_request(response)
+                        await self._publish_master_response(
+                            channel,
+                            round_data["campaign_id"],
+                            parsed_response["text"] or response,
+                        )
                 return
 
             if not channel:
@@ -1293,16 +1490,33 @@ class GameCog(commands.Cog):
                 )
                 return
 
-            async with channel.typing():
+            if self._should_stream_local():
                 try:
-                    response = await dm.process_scene_round(round_data["campaign_id"], round_id)
+                    streamed = await self._stream_master_response(
+                        channel,
+                        round_data["campaign_id"],
+                        dm.stream_scene_round(round_data["campaign_id"], round_id),
+                        operation="scene_round",
+                    )
                 except RuntimeError as error:
-                    await channel.send(str(error))
+                    await channel.send(_display_error(error))
                     return
+                response = streamed["full_text"]
+                roll_request = streamed["roll_request"]
+                visible_text = streamed["visible_text"]
+                streamed_source_message_id = streamed["source_message_id"]
+            else:
+                async with channel.typing():
+                    try:
+                        response = await dm.process_scene_round(round_data["campaign_id"], round_id)
+                    except RuntimeError as error:
+                        await channel.send(_display_error(error))
+                        return
 
-            parsed_response = dm.extract_roll_request(response)
-            roll_request = parsed_response["roll_request"]
-            visible_text = parsed_response["text"]
+                parsed_response = dm.extract_roll_request(response)
+                roll_request = parsed_response["roll_request"]
+                visible_text = parsed_response["text"]
+                streamed_source_message_id = None
 
             if roll_request:
                 target_response = self._resolve_round_roll_target(round_data, roll_request)
@@ -1311,17 +1525,25 @@ class GameCog(commands.Cog):
                     await self._update_round_prompt_message(
                         channel,
                         db.get_scene_round(round_id),
-                        "🎲 Раунд закрыт. Ожидается отдельный бросок."
+                        "?? Раунд закрыт. Ожидается отдельный бросок."
                     )
                     db.record_scene_round_activity(
                         round_data["campaign_id"],
                         had_expected_reply=has_answers,
                     )
-                    await self._publish_master_response(channel, round_data["campaign_id"], visible_text or response)
+                    if self._should_stream_local():
+                        await self._after_master_response(
+                            channel,
+                            round_data["campaign_id"],
+                            visible_text or response,
+                            streamed_source_message_id,
+                        )
+                    else:
+                        await self._publish_master_response(channel, round_data["campaign_id"], visible_text or response)
                     return
 
                 target_info, stored_response = target_response
-                if visible_text:
+                if visible_text and not self._should_stream_local():
                     await _send_long(channel, visible_text)
 
                 pending = db.create_pending_roll_request(
@@ -1339,7 +1561,7 @@ class GameCog(commands.Cog):
                 await self._update_round_prompt_message(
                     channel,
                     db.get_scene_round(round_id),
-                    "🎲 Раунд закрыт. Ожидается отдельный бросок."
+                    "?? Раунд закрыт. Ожидается отдельный бросок."
                 )
                 if db.get_campaign(round_data["campaign_id"]).get("roll_mode") == "bot_auto":
                     author = channel.guild.get_member(int(target_info["user_id"])) if getattr(channel, "guild", None) else None
@@ -1375,13 +1597,21 @@ class GameCog(commands.Cog):
             await self._update_round_prompt_message(
                 channel,
                 db.get_scene_round(round_id),
-                "✅ Раунд закрыт."
+                "? Раунд закрыт."
             )
             db.record_scene_round_activity(
                 round_data["campaign_id"],
                 had_expected_reply=has_answers,
             )
-            await self._publish_master_response(channel, round_data["campaign_id"], visible_text or response)
+            if self._should_stream_local():
+                await self._after_master_response(
+                    channel,
+                    round_data["campaign_id"],
+                    visible_text or response,
+                    streamed_source_message_id,
+                )
+            else:
+                await self._publish_master_response(channel, round_data["campaign_id"], visible_text or response)
         finally:
             self._resolving_rounds.discard(round_id)
 
@@ -1407,26 +1637,26 @@ class GameCog(commands.Cog):
         pending = db.get_open_pending_roll_request(campaign["id"], str(ctx.author.id))
         if target and target["status"] == "out_of_scene":
             await ctx.send(
-                f"🧭 **{target['character_name_snapshot']}** сейчас вне этой сцены, "
+                f"?? **{target['character_name_snapshot']}** сейчас вне этой сцены, "
                 "поэтому действие не повлияет на текущий эпизод."
             )
             return
 
         if pending and pending.get("round_id") == active_round["id"]:
             await ctx.send(
-                "🎲 На твой ход уже запрошен бросок. Пришли итог числом через `!бросок 17` "
+                "?? На твой ход уже запрошен бросок. Пришли итог числом через `!бросок 17` "
                 "или ответь реплаем с пометкой вроде `(бросок 17)`."
             )
             return
 
         if target and target["status"] in {"expected", "answered"}:
             await ctx.send(
-                "⏳ Сейчас открыт общий раунд выбора. Ответь **реплаем на сообщение бота с вариантами** "
+                "? Сейчас открыт общий раунд выбора. Ответь **реплаем на сообщение бота с вариантами** "
                 "или используй `!д <номер>` / `!д <своё действие>`, чтобы твой ход попал в общий резолв."
             )
             return
 
-        await ctx.send("ℹ️ Сейчас открыт групповой раунд. Дождись завершения текущего выбора.")
+        await ctx.send("?? Сейчас открыт групповой раунд. Дождись завершения текущего выбора.")
 
     def _is_character_creation_message(self, message) -> bool:
         character_cog = self.bot.get_cog("CharacterCog")
@@ -1461,10 +1691,10 @@ class GameCog(commands.Cog):
         mentions = " ".join(f"<@{target['user_id']}>" for target in expected_targets)
 
         if status_text:
-            first_line = "⌛ **Раунд выбора закрыт**"
+            first_line = "? **Раунд выбора закрыт**"
             second_line = status_text
         else:
-            first_line = "⏳ **Раунд выбора открыт**"
+            first_line = "? **Раунд выбора открыт**"
             second_line = f"Жду ответы от: {mentions}" if mentions else "Жду ответы от участников сцены."
 
         lines = [first_line, second_line]
@@ -1527,14 +1757,14 @@ class GameCog(commands.Cog):
         if status == "out_of_scene":
             return None
         if status == "timed_out":
-            return "⌛ Этот раунд уже закрыт по дедлайну. Дождись следующего ответа Мастера."
+            return "? Этот раунд уже закрыт по дедлайну. Дождись следующего ответа Мастера."
 
         if message_created_at is None:
             return None
 
         created_at = message_created_at.astimezone(timezone.utc).replace(tzinfo=None)
         if created_at > self._round_deadline_with_grace(round_data["deadline_at"]):
-            return "⌛ Дедлайн этого раунда уже истёк. Дождись следующего окна выбора."
+            return "? Дедлайн этого раунда уже истёк. Дождись следующего окна выбора."
         return None
 
     def _is_command_message(self, text: str) -> bool:
@@ -1669,9 +1899,9 @@ class GameCog(commands.Cog):
         crit_text = ""
         if sides == 20 and count == 1:
             if rolls[0] == 20:
-                crit_text = "\n🌟 **КРИТИЧЕСКИЙ УСПЕХ!**"
+                crit_text = "\n?? **КРИТИЧЕСКИЙ УСПЕХ!**"
             elif rolls[0] == 1:
-                crit_text = "\n💀 **КРИТИЧЕСКИЙ ПРОВАЛ!**"
+                crit_text = "\n?? **КРИТИЧЕСКИЙ ПРОВАЛ!**"
         title_suffix = f" + {stat_label} ({modifier_value:+d})" if stat_label else ""
         summary = self._format_roll_summary(char_name, count, sides, total, raw_total, modifier_value, stat_label, roll_str)
         return {
@@ -1692,7 +1922,7 @@ class GameCog(commands.Cog):
     def _build_roll_embed(self, roll_data: dict, char_name: str | None = None):
         color = 0xFFD700 if not roll_data["crit_text"] else (0x00FF00 if "УСПЕХ" in roll_data["crit_text"] else 0xFF0000)
         embed = discord.Embed(
-            title=f"🎲 Бросок {roll_data['count']}d{roll_data['sides']}{roll_data['modifier_text']}",
+            title=f"?? Бросок {roll_data['count']}d{roll_data['sides']}{roll_data['modifier_text']}",
             color=color,
         )
         embed.add_field(
@@ -1726,8 +1956,8 @@ class GameCog(commands.Cog):
     ) -> str:
         if stat_label:
             sign = "+" if modifier_value >= 0 else "-"
-            return f"🎲 {char_name}: {count}d{sides} + {stat_label} = {total} ({roll_str} {sign} {abs(modifier_value)})"
-        return f"🎲 {char_name}: {count}d{sides} = {total} ({roll_str})"
+            return f"?? {char_name}: {count}d{sides} + {stat_label} = {total} ({roll_str} {sign} {abs(modifier_value)})"
+        return f"?? {char_name}: {count}d{sides} = {total} ({roll_str})"
 
     def _character_modifier(self, char: dict | None, modifier_stat: str | None) -> int:
         if not char or not modifier_stat or modifier_stat not in game_data.get_stat_key_set():
@@ -1802,32 +2032,42 @@ class GameCog(commands.Cog):
     def _funny_no_pending_roll_reaction(self) -> str:
         return random.choice(MANUAL_NO_PENDING_REACTIONS)
 
-
-async def _send_long(target, text: str):
-    messages = []
-    if len(text) <= 2000:
-        messages.append(await target.send(text))
-        return messages
-
-    remaining = text
+def _split_message_chunks(text: str, limit: int = 1900) -> list[str]:
+    chunks = []
+    remaining = (text or "").strip()
     while remaining:
-        if len(remaining) <= 1900:
+        if len(remaining) <= limit:
             chunk = remaining
             remaining = ""
         else:
-            split_at = remaining.rfind("\n\n", 0, 1900)
-            if split_at < 1200:
-                split_at = remaining.rfind("\n", 0, 1900)
-            if split_at < 800:
-                split_at = remaining.rfind(" ", 0, 1900)
+            split_at = remaining.rfind("\n\n", 0, limit)
+            if split_at < max(1, limit - 700):
+                split_at = remaining.rfind("\n", 0, limit)
+            if split_at < max(1, limit - 1100):
+                split_at = remaining.rfind(" ", 0, limit)
             if split_at < 1:
-                split_at = 1900
+                split_at = limit
             chunk = remaining[:split_at].rstrip()
             remaining = remaining[split_at:].lstrip()
         if chunk:
-            messages.append(await target.send(chunk))
+            chunks.append(chunk)
+    return chunks
+
+
+def _visible_stream_text(text: str) -> str:
+    match = ROLL_REQUEST_START_RE.search(text or "")
+    if not match:
+        return (text or "").strip()
+    return (text or "")[: match.start()].rstrip()
+
+
+async def _send_long(target, text: str):
+    messages = []
+    for chunk in _split_message_chunks(text):
+        messages.append(await target.send(chunk))
     return messages
 
 
 async def setup(bot):
     await bot.add_cog(GameCog(bot))
+

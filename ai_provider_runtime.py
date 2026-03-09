@@ -1,5 +1,6 @@
 import logging
 import os
+from collections.abc import Iterator
 
 import anthropic
 import openai
@@ -35,6 +36,7 @@ _anthropic_client = None
 _openai_client = None
 _local_openai_client = None
 _local_model_name = None
+_MOJIBAKE_MARKERS = ("Р", "С", "рџ", "вљ", "вЏ", "РІ", "СЂ")
 
 
 def _response_request_id(response) -> str | None:
@@ -75,6 +77,30 @@ def _openai_status_error_details(error) -> str:
     return str(error)
 
 
+def normalize_user_facing_text(text: str) -> str:
+    if not text or not any(marker in text for marker in _MOJIBAKE_MARKERS):
+        return text
+
+    candidates = [text]
+    for source_encoding in ("cp1251", "latin1"):
+        try:
+            repaired = text.encode(source_encoding).decode("utf-8")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            continue
+        candidates.append(repaired)
+
+    def score(value: str) -> tuple[int, int]:
+        mojibake_hits = sum(value.count(marker) for marker in _MOJIBAKE_MARKERS)
+        readable_hits = sum(
+            1
+            for char in value
+            if ("а" <= char <= "я") or ("А" <= char <= "Я") or char in "ёЁ⚠️🌐⏳🔑"
+        )
+        return (readable_hits, -mojibake_hits)
+
+    return max(candidates, key=score)
+
+
 def _get_local_base_url() -> str:
     return (os.getenv("LLAMA_CPP_BASE_URL") or LLAMA_CPP_DEFAULT_BASE_URL).rstrip("/")
 
@@ -107,6 +133,10 @@ def get_model_name() -> str:
     if provider == "claude":
         return os.getenv("ANTHROPIC_MODEL", DEFAULT_MODELS["claude"])
     return os.getenv("OPENAI_MODEL", DEFAULT_MODELS["gpt"])
+
+
+def supports_streaming() -> bool:
+    return get_provider() == "local"
 
 
 def validate_configuration():
@@ -276,7 +306,7 @@ def _chat_message_content_to_text(content) -> str:
                 chunks.append(item)
             continue
         if isinstance(item, dict):
-            if item.get("type") == "text" and item.get("text"):
+            if item.get("text"):
                 chunks.append(str(item["text"]))
             continue
         text = getattr(item, "text", None)
@@ -379,6 +409,33 @@ def _build_local_chat_messages(system_prompt: str, messages: list) -> list[dict]
             }
         )
     return local_messages
+
+
+def _build_local_request_kwargs(system_prompt: str, messages: list, max_tokens: int) -> dict:
+    return {
+        "model": get_model_name(),
+        "messages": _build_local_chat_messages(system_prompt, messages),
+        "max_tokens": max_tokens,
+        "extra_body": {"cache_prompt": True},
+    }
+
+
+def _extract_local_stream_delta(event) -> str:
+    choices = getattr(event, "choices", None) or []
+    if not choices:
+        return ""
+
+    choice = choices[0]
+    delta = getattr(choice, "delta", None)
+    if delta is None and isinstance(choice, dict):
+        delta = choice.get("delta")
+    if delta is None:
+        return ""
+
+    content = getattr(delta, "content", None)
+    if content is None and isinstance(delta, dict):
+        content = delta.get("content")
+    return _chat_message_content_to_text(content)
 
 
 def _call_claude_api(system_prompt: str, messages: list, max_tokens: int = 1000) -> str:
@@ -497,11 +554,7 @@ def _call_openai_api(
 
 def _call_local_api(system_prompt: str, messages: list, max_tokens: int = 1000) -> str:
     base_url = _get_local_base_url()
-    request_kwargs = {
-        "model": get_model_name(),
-        "messages": _build_local_chat_messages(system_prompt, messages),
-        "max_tokens": max_tokens,
-    }
+    request_kwargs = _build_local_request_kwargs(system_prompt, messages, max_tokens)
 
     try:
         logger.debug(
@@ -542,6 +595,57 @@ def _call_local_api(system_prompt: str, messages: list, max_tokens: int = 1000) 
         raise RuntimeError("⚠️ **Неожиданная ошибка локальной модели llama.cpp.** Попробуй ещё раз чуть позже.") from error
 
 
+def _stream_local_api(system_prompt: str, messages: list, max_tokens: int = 1000) -> Iterator[str]:
+    base_url = _get_local_base_url()
+    request_kwargs = _build_local_request_kwargs(system_prompt, messages, max_tokens)
+    request_kwargs["stream"] = True
+
+    try:
+        logger.debug(
+            "Local llama.cpp stream started. base_url=%s model=%s messages=%s max_tokens=%s",
+            base_url,
+            request_kwargs["model"],
+            len(request_kwargs["messages"]),
+            max_tokens,
+        )
+        stream = _get_local_openai_client().chat.completions.create(**request_kwargs)
+        saw_text = False
+        for event in stream:
+            chunk = _extract_local_stream_delta(event)
+            if not chunk:
+                continue
+            saw_text = True
+            yield chunk
+        logger.debug(
+            "Local llama.cpp stream completed. base_url=%s model=%s",
+            base_url,
+            request_kwargs["model"],
+        )
+        if not saw_text:
+            raise RuntimeError("Р›РѕРєР°Р»СЊРЅР°СЏ РјРѕРґРµР»СЊ llama.cpp РІРµСЂРЅСѓР»Р° РѕС‚РІРµС‚ Р±РµР· С‚РµРєСЃС‚РѕРІРѕРіРѕ СЃРѕРѕР±С‰РµРЅРёСЏ.")
+    except openai.AuthenticationError:
+        raise RuntimeError("рџ”‘ **Р›РѕРєР°Р»СЊРЅС‹Р№ СЃРµСЂРІРµСЂ llama.cpp РѕС‚РєР»РѕРЅРёР» РєР»СЋС‡.** РџСЂРѕРІРµСЂСЊ `LLAMA_CPP_API_KEY`.") from None
+    except openai.APIStatusError as error:
+        details = _openai_status_error_details(error)
+        if error.status_code == 503 and "loading model" in details.lower():
+            raise RuntimeError("вЏі **Р›РѕРєР°Р»СЊРЅР°СЏ РјРѕРґРµР»СЊ llama.cpp РµС‰С‘ Р·Р°РіСЂСѓР¶Р°РµС‚СЃСЏ.** РџРѕРґРѕР¶РґРё РЅРµРјРЅРѕРіРѕ Рё РїРѕРїСЂРѕР±СѓР№ СЃРЅРѕРІР°.") from None
+        logger.warning(
+            "Local llama.cpp stream API status error. status=%s request_id=%s details=%s",
+            error.status_code,
+            _exception_request_id(error) or "unknown",
+            details,
+        )
+        raise RuntimeError(f"вљ пёЏ **РћС€РёР±РєР° Р»РѕРєР°Р»СЊРЅРѕРіРѕ СЃРµСЂРІРµСЂР° llama.cpp ({error.status_code})**: {details}") from None
+    except (openai.APIConnectionError, openai.APITimeoutError):
+        logger.warning("Local llama.cpp stream connection or timeout error. base_url=%s", base_url)
+        raise RuntimeError(f"рџЊђ **РќРµС‚ СЃРѕРµРґРёРЅРµРЅРёСЏ СЃ Р»РѕРєР°Р»СЊРЅРѕР№ РјРѕРґРµР»СЊСЋ llama.cpp.** РџСЂРѕРІРµСЂСЊ СЃРµСЂРІРµСЂ РЅР° `{base_url}`.") from None
+    except RuntimeError:
+        raise
+    except Exception as error:
+        logger.exception("Unexpected local llama.cpp stream SDK error")
+        raise RuntimeError("вљ пёЏ **РќРµРѕР¶РёРґР°РЅРЅР°СЏ РѕС€РёР±РєР° Р»РѕРєР°Р»СЊРЅРѕР№ РјРѕРґРµР»Рё llama.cpp.** РџРѕРїСЂРѕР±СѓР№ РµС‰С‘ СЂР°Р· С‡СѓС‚СЊ РїРѕР·Р¶Рµ.") from error
+
+
 def call_api(
     system_prompt: str,
     messages: list,
@@ -562,3 +666,9 @@ def call_api(
             openai_options=openai_options,
         )
     raise RuntimeError(f"Провайдер {provider} не поддерживается.")
+def stream_api(system_prompt: str, messages: list, max_tokens: int = 1000) -> Iterator[str]:
+    validate_configuration()
+    provider = get_provider()
+    if provider != "local":
+        raise RuntimeError(f"Потоковый вывод не поддерживается для провайдера {provider}.")
+    yield from _stream_local_api(system_prompt, messages, max_tokens=max_tokens)

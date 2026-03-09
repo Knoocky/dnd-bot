@@ -18,6 +18,10 @@ logger = logging.getLogger("dnd_bot.character")
 
 _ASI_ALLOWED_PATTERNS = {(2, 1), (1, 1, 1)}
 _CREATION_TIMEOUT = timedelta(minutes=15)
+
+
+def _display_error(error: Exception) -> str:
+    return ai_provider.normalize_user_facing_text(str(error))
 _creation_sessions: dict[int, dict] = {}
 
 _PROMPTS_DIR = Path(__file__).resolve().parent.parent / "data" / "prompts"
@@ -341,7 +345,7 @@ class CharacterCog(commands.Cog):
             parsed_asi = self._parse_asi_input(bonuses)
             self._validate_asi_pattern(parsed_asi, draft["base_stats"])
         except ValueError as error:
-            await ctx.send(str(error))
+            await ctx.send(_display_error(error))
             return
 
         draft["origin_asi"] = parsed_asi
@@ -440,7 +444,7 @@ class CharacterCog(commands.Cog):
         try:
             await leveling_cog._apply_step_choice(ctx, campaign, char, session, steps[step_index], subclass)
         except ValueError as error:
-            await ctx.send(str(error))
+            await ctx.send(_display_error(error))
             return
 
         session = db.get_active_levelup_session(campaign["id"])
@@ -634,7 +638,7 @@ class CharacterCog(commands.Cog):
                     session["user_id"],
                     self._get_session_step(session),
                 )
-                await target.send(str(error))
+                await target.send(_display_error(error))
                 return
             except Exception:
                 logger.exception(
@@ -707,7 +711,7 @@ class CharacterCog(commands.Cog):
                     mode,
                     error,
                 )
-                last_error = str(error)
+            last_error = _display_error(error)
 
         raise RuntimeError(
             "⚠️ Не удалось собрать валидный AI-черновик персонажа. Попробуй `!перегенерировать` или перейди в ручной режим."

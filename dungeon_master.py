@@ -8,6 +8,8 @@ import game_data
 from pathlib import Path
 import asyncio
 import logging
+import threading
+import time
 
 PROMPTS_DIR = Path(__file__).resolve().parent / "data" / "prompts"
 logger = logging.getLogger("dnd_bot.dm")
@@ -18,6 +20,25 @@ def _load_prompt(filename: str) -> str:
 
 CLAUDE_SYSTEM_PROMPT = _load_prompt("claude_system_prompt_ru_v_1.md")
 OPENAI_SYSTEM_PROMPT = _load_prompt("openai_system_prompt_ru_v_1.md")
+LOCAL_SYSTEM_PROMPT = """Ты — DnD-Bot, ведущий текстовой приключенческой игры.
+
+Главное:
+- веди сцену, мир, NPC и последствия;
+- не принимай решения за игрока;
+- не объявляй новые локации, NPC, предметы и удобные ресурсы установленным фактом только со слов игрока;
+- если исход неочевиден и есть риск, допускай проверку; если успех очевиден, не требуй бросок;
+- провалы должны менять ситуацию, а не просто останавливать игру;
+- держи в фокусе главную сюжетную линию и 1-2 поддерживающих;
+- соблюдай ограничения игрока и не добавляй неуместный чувствительный контент.
+
+Формат ответа:
+- пиши по-русски;
+- отвечай как ведущий сцены, а не как отчёт;
+- предпочитай 2-3 плотных абзаца живой сцены;
+- показывай последствия через повествование, а не сухую механику;
+- в конце почти каждого игрового ответа предлагай 3-5 вариантов действий нумерованным списком;
+- в бою держи позицию, угрозы, HP и важные состояния последовательно.
+"""
 
 ANALYZER_PROMPT = """Ты анализируешь последнее сообщение ведущего текстовой D&D-сцены для служебной логики Discord-бота.
 Верни только JSON без markdown и пояснений.
@@ -113,6 +134,15 @@ BLOCKED_PHRASES = [
 ]
 
 VALID_STATS = game_data.get_stat_key_set()
+EMBEDDED_PARTY_CONTEXT_RE = re.compile(
+    r"^\[\s*АКТИВНЫЕ ПЕРСОНАЖИ В ПАРТИИ:.*?\]\s*",
+    re.DOTALL,
+)
+LOCAL_MESSAGE_LIMIT = 10
+LOCAL_MESSAGE_CHAR_LIMIT = 700
+LOCAL_HISTORY_SUMMARY_LIMIT = 14
+LOCAL_HISTORY_SUMMARY_CHAR_LIMIT = 2800
+LOCAL_CHARACTERS_CONTEXT_CHAR_LIMIT = 600
 ROLL_REQUEST_PATTERN = re.compile(
     r"\[ROLL_REQUEST\]\s*(\{.*?\})\s*\[/ROLL_REQUEST\]",
     re.DOTALL | re.IGNORECASE,
@@ -169,6 +199,22 @@ MAIN_QUEST_PRESSURE_CONTEXT = {
 
 def _normalize_name(name: str) -> str:
     return re.sub(r"\s+", " ", name.strip().lower())
+
+
+def _is_local_provider() -> bool:
+    return ai_provider.get_provider() == "local"
+
+
+def _strip_embedded_party_context(text: str) -> str:
+    cleaned = EMBEDDED_PARTY_CONTEXT_RE.sub("", text or "").strip()
+    return cleaned or (text or "").strip()
+
+
+def _truncate_text(text: str, limit: int) -> str:
+    normalized = re.sub(r"\s+", " ", (text or "").strip())
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: max(0, limit - 1)].rstrip() + "…"
 
 
 def _strip_code_fences(text: str) -> str:
@@ -238,8 +284,12 @@ def extract_roll_request(text: str) -> dict:
 
 def _extract_numbered_options(text: str) -> list[str]:
     options = []
-    for match in re.finditer(r"^\s*(\d+)[\.)]\s+(.+)$", text, flags=re.MULTILINE):
-        option = match.group(2).strip()
+    pattern = re.compile(
+        r"^\s*(?:[-*]\s*)?(?:\*\*)?(\d+)(?:\*\*)?\s*[\.)]\s*(?:\*\*)?(.+?)(?:\*\*)?\s*$",
+        flags=re.MULTILINE,
+    )
+    for match in pattern.finditer(text):
+        option = re.sub(r"\*\*", "", match.group(2)).strip()
         if option:
             options.append(option)
     return options[:5]
@@ -291,8 +341,10 @@ def get_system_prompt(campaign_id: int) -> str:
         ]
     )
     system_prompt = (
-        OPENAI_SYSTEM_PROMPT
-        if ai_provider.get_provider() in {"gpt", "local"}
+        LOCAL_SYSTEM_PROMPT
+        if _is_local_provider()
+        else OPENAI_SYSTEM_PROMPT
+        if ai_provider.get_provider() == "gpt"
         else CLAUDE_SYSTEM_PROMPT
     )
     return f"{system_prompt}\n\n---\n\n{dynamic_context}"
@@ -304,11 +356,15 @@ def is_role_break_attempt(text: str) -> bool:
 
 
 def build_messages(campaign_id: int) -> list:
-    history = db.get_history(campaign_id, limit=60)
-    messages = []
+    history = db.get_history(campaign_id, limit=LOCAL_MESSAGE_LIMIT if _is_local_provider() else 60)
+    party_context = compact_characters_context(campaign_id) if _is_local_provider() else characters_context(campaign_id)
+    messages = [{"role": "user", "content": f"[Текущий состав партии]\n{party_context}"}]
     for msg in history:
         role = "user" if msg["role"] == "user" else "assistant"
-        messages.append({"role": role, "content": msg["content"]})
+        content = _strip_embedded_party_context(msg["content"])
+        if _is_local_provider():
+            content = _truncate_text(content, LOCAL_MESSAGE_CHAR_LIMIT)
+        messages.append({"role": role, "content": content})
     return messages
 
 
@@ -330,6 +386,41 @@ def characters_context(campaign_id: int) -> str:
     return "\n".join(lines)
 
 
+def compact_characters_context(campaign_id: int) -> str:
+    chars = db.get_all_characters(campaign_id)
+    if not chars:
+        return "Партия ещё не собрана."
+
+    lines = ["ПАРТИЯ:"]
+    for char in chars:
+        lines.append(
+            f"- {char['name']}: "
+            f"{game_data.get_character_archetype_text(char['race'], char['class'], subrace_key=char.get('subrace'), subclass_key=char.get('subclass'))}, "
+            f"ур.{char['level']}, HP {char['hp']}/{char['max_hp']}, золото {char['gold']}"
+        )
+
+    return _truncate_text("\n".join(lines), LOCAL_CHARACTERS_CONTEXT_CHAR_LIMIT)
+
+
+def recent_history_summary(campaign_id: int) -> str:
+    history = db.get_history(campaign_id, limit=LOCAL_HISTORY_SUMMARY_LIMIT if _is_local_provider() else 50)
+    lines = []
+    total_chars = 0
+    char_limit = LOCAL_HISTORY_SUMMARY_CHAR_LIMIT if _is_local_provider() else 12000
+
+    for msg in history:
+        content = _strip_embedded_party_context(msg["content"])
+        if _is_local_provider():
+            content = _truncate_text(content, 260 if msg["role"] == "assistant" else 220)
+        line = f"[{msg['username']}]: {content}" if msg["role"] == "user" else f"[Мастер]: {content}"
+        if total_chars + len(line) > char_limit:
+            break
+        lines.append(line)
+        total_chars += len(line) + 1
+
+    return "\n".join(lines)
+
+
 def analyze_scene_response(campaign_id: int, assistant_text: str) -> dict:
     extracted_options = _extract_numbered_options(assistant_text)
     chars = db.get_all_characters(campaign_id)
@@ -345,10 +436,18 @@ def analyze_scene_response(campaign_id: int, assistant_text: str) -> dict:
     if not chars:
         return fallback
 
+    if _is_local_provider():
+        logger.info(
+            "Using heuristic-only local round analysis. campaign_id=%s options=%s",
+            campaign_id,
+            len(extracted_options),
+        )
+        return fallback
+
     analysis_request = (
         f"Список живых персонажей: {', '.join(char['name'] for char in chars)}\n\n"
         f"Последнее сообщение ведущего:\n{assistant_text}\n\n"
-        f"Недавний контекст сцены:\n{db.get_history_summary(campaign_id)}"
+        f"Недавний контекст сцены:\n{recent_history_summary(campaign_id)}"
     )
 
     try:
@@ -397,7 +496,7 @@ def analyze_xp_award(campaign_id: int, assistant_text: str) -> dict:
     request = (
         f"Party characters: {', '.join(char['name'] for char in chars)}\n\n"
         f"Latest DM response:\n{assistant_text}\n\n"
-        f"Recent campaign context:\n{db.get_history_summary(campaign_id)}"
+        f"Recent campaign context:\n{recent_history_summary(campaign_id)}"
     )
 
     try:
@@ -454,7 +553,7 @@ def analyze_action_roll(campaign_id: int, user_id: str, username: str, action_te
         f"Персонаж: {char_name}\n"
         f"Лист персонажа: {char_context}\n\n"
         f"Действие игрока:\n{action_text}\n\n"
-        f"Недавний контекст:\n{db.get_history_summary(campaign_id)}"
+        f"Недавний контекст:\n{recent_history_summary(campaign_id)}"
     )
 
     try:
@@ -497,7 +596,7 @@ def analyze_action_roll(campaign_id: int, user_id: str, username: str, action_te
 
 
 async def start_campaign(campaign_id: int, title: str, intro_answers: dict | None = None) -> str:
-    chars_ctx = characters_context(campaign_id)
+    chars_ctx = compact_characters_context(campaign_id) if _is_local_provider() else characters_context(campaign_id)
     roll_mode = _campaign_roll_mode(campaign_id)
     intro_answers = intro_answers or {}
     intro_setup_lines = [
@@ -533,81 +632,14 @@ async def start_campaign(campaign_id: int, title: str, intro_answers: dict | Non
     return answer
 
 
-async def process_action(campaign_id: int, user_id: str, username: str, action: str) -> str:
-    if is_role_break_attempt(action):
-        return (
-            "🌫️ *Таинственная сила поглощает слова героя... Голоса из ниоткуда "
-            "растворяются в воздухе. Мастер лишь загадочно усмехается.* "
-            "Что ты на самом деле делаешь?"
-        )
-
+def _action_user_content(campaign_id: int, user_id: str, username: str, action: str) -> str:
     char = db.get_character(user_id, campaign_id)
-    chars_ctx = characters_context(campaign_id)
-
     if char:
-        user_content = (
-            f"[{chars_ctx}]\n\n"
-            f"{char['name']} (игрок {username}) делает: {action}"
-        )
-    else:
-        user_content = (
-            f"[{chars_ctx}]\n\n"
-            f"{username} (без персонажа) говорит/делает: {action}"
-        )
-
-    db.add_message(campaign_id, "user", user_content, user_id, username)
-
-    messages = build_messages(campaign_id)
-    logger.info("Processing DM action. campaign_id=%s user_id=%s", campaign_id, user_id)
-    answer = await asyncio.to_thread(
-        ai_provider.call_api,
-        get_system_prompt(campaign_id),
-        messages,
-        2200,
-    )
-    db.add_message(campaign_id, "assistant", answer)
-    logger.info("DM action processed. campaign_id=%s user_id=%s", campaign_id, user_id)
-    return answer
+        return f"{char['name']} (игрок {username}) делает: {action}"
+    return f"{username} (без персонажа) говорит/делает: {action}"
 
 
-async def process_roll(
-    campaign_id: int,
-    user_id: str,
-    username: str,
-    roll_result: int,
-    roll_type: str,
-) -> str:
-    char = db.get_character(user_id, campaign_id)
-    name = char["name"] if char else username
-
-    user_content = (
-        f"(бросок {roll_type}): {name} бросает кубик - выпадает **{roll_result}**"
-    )
-    db.add_message(campaign_id, "user", user_content, user_id, username)
-
-    messages = build_messages(campaign_id)
-    logger.info(
-        "Processing roll narration. campaign_id=%s user_id=%s roll_type=%s",
-        campaign_id,
-        user_id,
-        roll_type,
-    )
-    answer = await asyncio.to_thread(
-        ai_provider.call_api,
-        get_system_prompt(campaign_id),
-        messages,
-        1400,
-    )
-    db.add_message(campaign_id, "assistant", answer)
-    logger.info("Roll narration processed. campaign_id=%s user_id=%s", campaign_id, user_id)
-    return answer
-
-
-async def process_scene_round(campaign_id: int, round_id: int) -> str:
-    round_data = db.get_scene_round(round_id)
-    if not round_data:
-        raise RuntimeError("Активный раунд сцены не найден.")
-
+def _build_scene_round_summary_message(campaign_id: int, round_data: dict) -> str:
     responses_by_user = {response["user_id"]: response for response in round_data["responses"]}
     options_text = "\n".join(
         f"{index}. {option}" for index, option in enumerate(round_data["options"], start=1)
@@ -648,7 +680,220 @@ async def process_scene_round(campaign_id: int, round_id: int) -> str:
             line = f"- {target['character_name_snapshot']} не определён в текущей сцене."
         round_lines.append(line)
 
-    summary_message = f"[{characters_context(campaign_id)}]\n\n" + "\n".join(round_lines)
+    round_context = compact_characters_context(campaign_id) if _is_local_provider() else characters_context(campaign_id)
+    return f"[{round_context}]\n\n" + "\n".join(round_lines)
+
+
+async def _stream_response_events(
+    campaign_id: int,
+    messages: list,
+    max_tokens: int,
+    operation: str,
+    log_context: dict,
+):
+    if not ai_provider.supports_streaming():
+        answer = await asyncio.to_thread(
+            ai_provider.call_api,
+            get_system_prompt(campaign_id),
+            messages,
+            max_tokens,
+        )
+        yield {"text": answer, "done": True, "chunk_count": 1, "chars": len(answer)}
+        return
+
+    loop = asyncio.get_running_loop()
+    queue = asyncio.Queue()
+    system_prompt = get_system_prompt(campaign_id)
+    started_at = time.perf_counter()
+    context_items = " ".join(f"{key}={value}" for key, value in sorted(log_context.items()))
+
+    logger.info(
+        "Local stream started. operation=%s campaign_id=%s max_tokens=%s %s",
+        operation,
+        campaign_id,
+        max_tokens,
+        context_items,
+    )
+
+    def worker():
+        chunks = []
+        chunk_count = 0
+        first_chunk_ms = None
+
+        try:
+            for chunk in ai_provider.stream_api(system_prompt, messages, max_tokens):
+                if not chunk:
+                    continue
+                chunks.append(chunk)
+                chunk_count += 1
+                if first_chunk_ms is None:
+                    first_chunk_ms = int((time.perf_counter() - started_at) * 1000)
+                    logger.info(
+                        "Local stream first chunk. operation=%s campaign_id=%s first_chunk_ms=%s %s",
+                        operation,
+                        campaign_id,
+                        first_chunk_ms,
+                        context_items,
+                    )
+                snapshot = "".join(chunks)
+                loop.call_soon_threadsafe(
+                    queue.put_nowait,
+                    {
+                        "kind": "chunk",
+                        "text": snapshot,
+                        "chunk_count": chunk_count,
+                        "first_chunk_ms": first_chunk_ms,
+                    },
+                )
+
+            final_text = "".join(chunks).strip()
+            if not final_text:
+                raise RuntimeError("Локальная модель не вернула текстовый ответ.")
+
+            loop.call_soon_threadsafe(
+                queue.put_nowait,
+                {
+                    "kind": "done",
+                    "text": final_text,
+                    "chunk_count": chunk_count,
+                    "first_chunk_ms": first_chunk_ms,
+                    "total_ms": int((time.perf_counter() - started_at) * 1000),
+                    "chars": len(final_text),
+                },
+            )
+        except Exception as error:
+            loop.call_soon_threadsafe(queue.put_nowait, {"kind": "error", "error": error})
+
+    threading.Thread(target=worker, daemon=True).start()
+
+    while True:
+        event = await queue.get()
+        kind = event["kind"]
+        if kind == "chunk":
+            yield {
+                "text": event["text"],
+                "done": False,
+                "chunk_count": event["chunk_count"],
+                "first_chunk_ms": event["first_chunk_ms"],
+            }
+            continue
+        if kind == "done":
+            logger.info(
+                "Local stream completed. operation=%s campaign_id=%s first_chunk_ms=%s total_ms=%s chars=%s chunks=%s %s",
+                operation,
+                campaign_id,
+                event["first_chunk_ms"] or 0,
+                event["total_ms"],
+                event["chars"],
+                event["chunk_count"],
+                context_items,
+            )
+            yield {
+                "text": event["text"],
+                "done": True,
+                "chunk_count": event["chunk_count"],
+                "first_chunk_ms": event["first_chunk_ms"],
+                "total_ms": event["total_ms"],
+                "chars": event["chars"],
+            }
+            return
+        raise event["error"]
+
+
+async def process_action(campaign_id: int, user_id: str, username: str, action: str) -> str:
+    if is_role_break_attempt(action):
+        return (
+            "🌫️ *Таинственная сила поглощает слова героя... Голоса из ниоткуда "
+            "растворяются в воздухе. Мастер лишь загадочно усмехается.* "
+            "Что ты на самом деле делаешь?"
+        )
+
+    user_content = _action_user_content(campaign_id, user_id, username, action)
+
+    db.add_message(campaign_id, "user", user_content, user_id, username)
+
+    messages = build_messages(campaign_id)
+    logger.info("Processing DM action. campaign_id=%s user_id=%s", campaign_id, user_id)
+    answer = await asyncio.to_thread(
+        ai_provider.call_api,
+        get_system_prompt(campaign_id),
+        messages,
+        2200,
+    )
+    db.add_message(campaign_id, "assistant", answer)
+    logger.info("DM action processed. campaign_id=%s user_id=%s", campaign_id, user_id)
+    return answer
+
+
+async def stream_action(campaign_id: int, user_id: str, username: str, action: str):
+    if is_role_break_attempt(action):
+        yield {
+            "text": (
+                "🌫️ *Таинственная сила поглощает слова героя... Голоса из ниоткуда "
+                "растворяются в воздухе. Мастер лишь загадочно усмехается.* "
+                "Что ты на самом деле делаешь?"
+            ),
+            "done": True,
+            "chunk_count": 0,
+            "chars": 0,
+        }
+        return
+
+    user_content = _action_user_content(campaign_id, user_id, username, action)
+    db.add_message(campaign_id, "user", user_content, user_id, username)
+
+    messages = build_messages(campaign_id)
+    async for event in _stream_response_events(
+        campaign_id,
+        messages,
+        2200,
+        operation="action",
+        log_context={"user_id": user_id},
+    ):
+        if event["done"]:
+            db.add_message(campaign_id, "assistant", event["text"])
+            logger.info("DM action processed. campaign_id=%s user_id=%s", campaign_id, user_id)
+        yield event
+
+
+async def process_roll(
+    campaign_id: int,
+    user_id: str,
+    username: str,
+    roll_result: int,
+    roll_type: str,
+) -> str:
+    char = db.get_character(user_id, campaign_id)
+    name = char["name"] if char else username
+
+    user_content = (
+        f"(бросок {roll_type}): {name} бросает кубик - выпадает **{roll_result}**"
+    )
+    db.add_message(campaign_id, "user", user_content, user_id, username)
+
+    messages = build_messages(campaign_id)
+    logger.info(
+        "Processing roll narration. campaign_id=%s user_id=%s roll_type=%s",
+        campaign_id,
+        user_id,
+        roll_type,
+    )
+    answer = await asyncio.to_thread(
+        ai_provider.call_api,
+        get_system_prompt(campaign_id),
+        messages,
+        1400,
+    )
+    db.add_message(campaign_id, "assistant", answer)
+    logger.info("Roll narration processed. campaign_id=%s user_id=%s", campaign_id, user_id)
+    return answer
+
+
+async def process_scene_round(campaign_id: int, round_id: int) -> str:
+    round_data = db.get_scene_round(round_id)
+    if not round_data:
+        raise RuntimeError("Активный раунд сцены не найден.")
+    summary_message = _build_scene_round_summary_message(campaign_id, round_data)
     db.add_message(campaign_id, "user", summary_message)
 
     messages = build_messages(campaign_id)
@@ -664,9 +909,31 @@ async def process_scene_round(campaign_id: int, round_id: int) -> str:
     return answer
 
 
+async def stream_scene_round(campaign_id: int, round_id: int):
+    round_data = db.get_scene_round(round_id)
+    if not round_data:
+        raise RuntimeError("Активный раунд сцены не найден.")
+
+    summary_message = _build_scene_round_summary_message(campaign_id, round_data)
+    db.add_message(campaign_id, "user", summary_message)
+
+    messages = build_messages(campaign_id)
+    async for event in _stream_response_events(
+        campaign_id,
+        messages,
+        2200,
+        operation="scene_round",
+        log_context={"round_id": round_id},
+    ):
+        if event["done"]:
+            db.add_message(campaign_id, "assistant", event["text"])
+            logger.info("Scene round processed. campaign_id=%s round_id=%s", campaign_id, round_id)
+        yield event
+
+
 async def get_summary(campaign_id: int) -> str:
-    history_text = db.get_history_summary(campaign_id)
-    chars_ctx = characters_context(campaign_id)
+    history_text = recent_history_summary(campaign_id)
+    chars_ctx = compact_characters_context(campaign_id) if _is_local_provider() else characters_context(campaign_id)
 
     summary_request = (
         "<лист персонажа> Составь краткую хронику (5-8 предложений): "
