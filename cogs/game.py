@@ -1,4 +1,5 @@
-﻿import random
+﻿import logging
+import random
 import re
 from datetime import datetime, timedelta, timezone
 
@@ -11,7 +12,10 @@ import dungeon_master as dm
 import game_data
 import leveling
 
+logger = logging.getLogger(__name__)
+
 ROUND_TIMEOUT_MINUTES = 5
+ROUND_TIMEOUT_GRACE_SECONDS = 10
 XP_AWARD_MAX = 50
 XP_AWARD_COOLDOWN_MINUTES = 20
 SETUP_ROLL_MODE_CHOICES = {
@@ -181,7 +185,8 @@ class GameCog(commands.Cog):
 
     @tasks.loop(seconds=15)
     async def round_watcher(self):
-        due_rounds = db.get_due_scene_rounds(db.utcnow_iso())
+        effective_now = (datetime.utcnow() - timedelta(seconds=ROUND_TIMEOUT_GRACE_SECONDS)).isoformat()
+        due_rounds = db.get_due_scene_rounds(effective_now)
         for round_data in due_rounds:
             campaign = db.get_campaign(round_data["campaign_id"])
             channel = await self._get_channel(campaign["channel_id"]) if campaign else None
@@ -356,6 +361,10 @@ class GameCog(commands.Cog):
             if not target:
                 await ctx.send("❌ Твой персонаж не участвует в текущем раунде выбора.")
                 return
+            round_input_error = self._get_round_input_restriction(active_round, target, ctx.message.created_at)
+            if round_input_error:
+                await ctx.send(round_input_error)
+                return
             if target["status"] == "out_of_scene":
                 await ctx.send(
                     f"🧭 **{target['character_name_snapshot']}** сейчас вне этой сцены, "
@@ -363,14 +372,18 @@ class GameCog(commands.Cog):
                 )
                 return
 
-            char_name, parsed = self._submit_round_response(
-                campaign,
-                active_round,
-                target,
-                str(ctx.author.id),
-                str(ctx.message.id),
-                text,
-            )
+            try:
+                char_name, parsed = self._submit_round_response(
+                    campaign,
+                    active_round,
+                    target,
+                    str(ctx.author.id),
+                    str(ctx.message.id),
+                    text,
+                )
+            except ValueError:
+                await ctx.send("⌛ Этот раунд уже закрыт. Дождись следующего ответа Мастера.")
+                return
             if parsed["response_kind"] == "option":
                 await ctx.send(
                     f"✅ Ход для **{char_name}** принят как вариант **{parsed['selected_option']}**."
@@ -544,6 +557,10 @@ class GameCog(commands.Cog):
         target = db.get_scene_round_target(active_round["id"], str(ctx.author.id))
         if not target:
             await ctx.send("❌ Твой персонаж не участвует в текущем раунде.")
+            return
+        round_input_error = self._get_round_input_restriction(active_round, target, ctx.message.created_at)
+        if round_input_error:
+            await ctx.send(round_input_error)
             return
         if target["status"] == "out_of_scene":
             await ctx.send("ℹ️ Твой персонаж сейчас вне сцены и не влияет на этот эпизод.")
@@ -769,6 +786,10 @@ class GameCog(commands.Cog):
         target = db.get_scene_round_target(active_round["id"], str(message.author.id))
         if not target:
             return
+        round_input_error = self._get_round_input_restriction(active_round, target, message.created_at)
+        if round_input_error:
+            await message.reply(round_input_error, mention_author=False)
+            return
 
         if target["status"] == "out_of_scene":
             db.add_message(
@@ -969,7 +990,6 @@ class GameCog(commands.Cog):
             )
             if campaign.get("roll_mode") == "bot_auto":
                 roll_data = self._perform_auto_roll(char, char_name, roll_request)
-                await channel.send(roll_data["summary"])
                 await self._resolve_pending_roll_request(
                     channel,
                     campaign,
@@ -987,14 +1007,18 @@ class GameCog(commands.Cog):
         await self._publish_master_response(channel, campaign["id"], visible_text or response)
 
     async def _handle_round_reply(self, message, campaign: dict, active_round: dict, target: dict, content: str):
-        char_name, _ = self._submit_round_response(
-            campaign,
-            active_round,
-            target,
-            str(message.author.id),
-            str(message.id),
-            content,
-        )
+        try:
+            char_name, _ = self._submit_round_response(
+                campaign,
+                active_round,
+                target,
+                str(message.author.id),
+                str(message.id),
+                content,
+            )
+        except ValueError:
+            await message.reply("⌛ Этот раунд уже закрыт. Дождись следующего ответа Мастера.", mention_author=False)
+            return
         await message.reply(f"✅ Ход для **{char_name}** принят.", mention_author=False)
         await self._maybe_resolve_if_complete(active_round["id"], message.channel)
 
@@ -1223,7 +1247,15 @@ class GameCog(commands.Cog):
                 return
 
             has_answers = any(target["status"] == "answered" for target in round_data["targets"])
-            if round_data["answered_count"] == 0:
+            logger.info(
+                "Round resolve: round_id=%s campaign_id=%s timed_out=%s has_answers=%s statuses=%s",
+                round_id,
+                round_data["campaign_id"],
+                timed_out,
+                has_answers,
+                self._summarize_round_targets(round_data),
+            )
+            if not has_answers:
                 next_status = "resolved" if timed_out else "expired"
                 db.finalize_scene_round(round_id, next_status)
                 round_data = db.get_scene_round(round_id)
@@ -1262,7 +1294,7 @@ class GameCog(commands.Cog):
                 db.finalize_scene_round(round_id, "resolved" if has_answers else "expired")
                 db.record_scene_round_activity(
                     round_data["campaign_id"],
-                    had_expected_reply=round_data["answered_count"] > 0,
+                    had_expected_reply=has_answers,
                 )
                 return
 
@@ -1288,7 +1320,7 @@ class GameCog(commands.Cog):
                     )
                     db.record_scene_round_activity(
                         round_data["campaign_id"],
-                        had_expected_reply=round_data["answered_count"] > 0,
+                        had_expected_reply=has_answers,
                     )
                     await self._publish_master_response(channel, round_data["campaign_id"], visible_text or response)
                     return
@@ -1328,15 +1360,16 @@ class GameCog(commands.Cog):
                     char = db.get_character(target_info["user_id"], round_data["campaign_id"])
                     char_name = char["name"] if char else target_info["character_name_snapshot"]
                     roll_data = self._perform_auto_roll(char, char_name, roll_request)
-                    await channel.send(roll_data["summary"])
-                    await self._resolve_pending_roll_request(
-                        channel,
-                        db.get_campaign(round_data["campaign_id"]),
-                        author,
-                        pending,
-                        roll_data["total"],
-                        stored_response["message_id"] or round_data.get("message_id") or str(channel.id),
-                        performed_by_bot=True,
+                    asyncio.create_task(
+                        self._resolve_pending_roll_request(
+                            channel,
+                            db.get_campaign(round_data["campaign_id"]),
+                            author,
+                            pending,
+                            roll_data["total"],
+                            stored_response["message_id"] or round_data.get("message_id") or str(channel.id),
+                            performed_by_bot=True,
+                        )
                     )
                     return
 
@@ -1351,7 +1384,7 @@ class GameCog(commands.Cog):
             )
             db.record_scene_round_activity(
                 round_data["campaign_id"],
-                had_expected_reply=round_data["answered_count"] > 0,
+                had_expected_reply=has_answers,
             )
             await self._publish_master_response(channel, round_data["campaign_id"], visible_text or response)
         finally:
@@ -1479,6 +1512,36 @@ class GameCog(commands.Cog):
             return ROUND_TIMEOUT_MINUTES
         return min(max(value, 1), 120)
 
+    def _round_deadline_with_grace(self, deadline_at: str) -> datetime:
+        deadline = datetime.fromisoformat(deadline_at)
+        return deadline + timedelta(seconds=ROUND_TIMEOUT_GRACE_SECONDS)
+
+    def _summarize_round_targets(self, round_data: dict) -> str:
+        return ",".join(
+            f"{target.get('character_name_snapshot') or target.get('user_id')}={target.get('status')}"
+            for target in round_data.get("targets", [])
+        )
+
+    def _get_round_input_restriction(
+        self,
+        round_data: dict,
+        target: dict,
+        message_created_at: datetime | None,
+    ) -> str | None:
+        status = (target.get("status") or "").strip().lower()
+        if status == "out_of_scene":
+            return None
+        if status == "timed_out":
+            return "⌛ Этот раунд уже закрыт по дедлайну. Дождись следующего ответа Мастера."
+
+        if message_created_at is None:
+            return None
+
+        created_at = message_created_at.astimezone(timezone.utc).replace(tzinfo=None)
+        if created_at > self._round_deadline_with_grace(round_data["deadline_at"]):
+            return "⌛ Дедлайн этого раунда уже истёк. Дождись следующего окна выбора."
+        return None
+
     def _is_command_message(self, text: str) -> bool:
         prefix = self.bot.command_prefix
         if isinstance(prefix, str):
@@ -1523,7 +1586,10 @@ class GameCog(commands.Cog):
         source_message_id: str,
         content: str,
     ) -> tuple[str, dict]:
-        char_name = target.get("character_name_snapshot") or user_id
+        current_target = db.get_scene_round_target(active_round["id"], user_id) or target
+        if (current_target.get("status") or "").strip().lower() not in {"expected", "answered"}:
+            raise ValueError("round_closed")
+        char_name = current_target.get("character_name_snapshot") or user_id
         parsed = self._parse_round_reply(content, active_round["options"])
         db.cancel_open_pending_roll_requests(campaign["id"], user_id)
         db.upsert_scene_round_response(
