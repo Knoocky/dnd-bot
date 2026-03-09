@@ -9,6 +9,7 @@ CAMPAIGN_DEFAULTS = {
     "leveling_mode": "xp_auto_ai",
     "hp_gain_mode": None,
     "scene_round_timeout_minutes": 5,
+    "main_quest_pressure": "soft",
 }
 
 CHARACTER_JSON_FIELDS = {
@@ -68,6 +69,10 @@ def _campaign_from_row(row):
         campaign.get("scene_round_timeout_minutes")
         or CAMPAIGN_DEFAULTS["scene_round_timeout_minutes"]
     )
+    campaign["main_quest_pressure"] = (
+        campaign.get("main_quest_pressure")
+        or CAMPAIGN_DEFAULTS["main_quest_pressure"]
+    )
     return campaign
 
 
@@ -116,6 +121,8 @@ def _ensure_campaign_columns(conn):
         conn.execute("ALTER TABLE campaigns ADD COLUMN intro_answers_json TEXT DEFAULT '{}'")
     if "scene_round_timeout_minutes" not in existing_columns:
         conn.execute("ALTER TABLE campaigns ADD COLUMN scene_round_timeout_minutes INTEGER DEFAULT 5")
+    if "main_quest_pressure" not in existing_columns:
+        conn.execute("ALTER TABLE campaigns ADD COLUMN main_quest_pressure TEXT DEFAULT 'soft'")
 
 
 def _ensure_character_columns(conn):
@@ -152,6 +159,7 @@ def init_db():
             intro_status TEXT DEFAULT 'not_started',
             intro_answers_json TEXT DEFAULT '{}',
             scene_round_timeout_minutes INTEGER DEFAULT 5,
+            main_quest_pressure TEXT DEFAULT 'soft',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -409,6 +417,17 @@ def set_campaign_scene_round_timeout(campaign_id: int, timeout_minutes: int):
     conn.execute(
         "UPDATE campaigns SET scene_round_timeout_minutes = ? WHERE id = ?",
         (timeout_minutes, campaign_id),
+    )
+    conn.commit()
+    conn.close()
+    return get_campaign(campaign_id)
+
+
+def set_campaign_main_quest_pressure(campaign_id: int, pressure_mode: str):
+    conn = get_connection()
+    conn.execute(
+        "UPDATE campaigns SET main_quest_pressure = ? WHERE id = ?",
+        (pressure_mode, campaign_id),
     )
     conn.commit()
     conn.close()

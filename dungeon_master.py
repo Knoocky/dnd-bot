@@ -145,6 +145,27 @@ ROLL_MODE_CONTEXT = {
     ),
 }
 
+MAIN_QUEST_PRESSURE_CONTEXT = {
+    "rare": (
+        "РЕЖИМ ДАВЛЕНИЯ ГЛАВНОГО СЮЖЕТА: rare. "
+        "Всегда держи в фокусе 1 главный квест и при необходимости ещё 1-2 поддерживающих, но не больше 3 ведущих линий одновременно. "
+        "Побочные сцены допустимы, однако серьёзные последствия за уход в сторону включай только после повторного или длительного игнора главной линии. "
+        "Если герои надолго отвлекаются, мир движется без них: следы стынут, антагонисты укрепляются, окна возможностей закрываются."
+    ),
+    "soft": (
+        "РЕЖИМ ДАВЛЕНИЯ ГЛАВНОГО СЮЖЕТА: soft. "
+        "Всегда держи в фокусе 1 главный квест и при необходимости ещё 1-2 поддерживающих, но не больше 3 ведущих линий одновременно. "
+        "Почти каждое заметное отклонение от главной линии должно иметь мягкую, но ощутимую цену: потерю времени, ресурса, позиции, свежести следов, выгодной цены, доступа к NPC или окна возможности. "
+        "Не ломай кампанию сразу, но регулярно напоминай через мир, что промедление чего-то стоит."
+    ),
+    "hard": (
+        "РЕЖИМ ДАВЛЕНИЯ ГЛАВНОГО СЮЖЕТА: hard. "
+        "Всегда держи в фокусе 1 главный квест и при необходимости ещё 1-2 поддерживающих, но не больше 3 ведущих линий одновременно. "
+        "Заметное отклонение от главной линии должно быстро вызывать серьёзные сюжетные потери: враги уходят вперёд, следы исчезают, союзники меняют позицию, цены растут, угрозы усиливаются, а упущенные возможности реально закрываются. "
+        "Наказывай миром и временем, а не произволом, и всё равно сохраняй логичность последствий."
+    ),
+}
+
 
 def _normalize_name(name: str) -> str:
     return re.sub(r"\s+", " ", name.strip().lower())
@@ -253,9 +274,22 @@ def _campaign_roll_mode(campaign_id: int) -> str:
     return campaign.get("roll_mode") or "bot_auto"
 
 
+def _campaign_main_quest_pressure(campaign_id: int) -> str:
+    campaign = db.get_campaign(campaign_id)
+    if not campaign:
+        return "soft"
+    return campaign.get("main_quest_pressure") or "soft"
+
+
 def get_system_prompt(campaign_id: int) -> str:
     roll_mode = _campaign_roll_mode(campaign_id)
-    dynamic_context = ROLL_MODE_CONTEXT.get(roll_mode, ROLL_MODE_CONTEXT["bot_auto"])
+    quest_pressure = _campaign_main_quest_pressure(campaign_id)
+    dynamic_context = "\n\n".join(
+        [
+            ROLL_MODE_CONTEXT.get(roll_mode, ROLL_MODE_CONTEXT["bot_auto"]),
+            MAIN_QUEST_PRESSURE_CONTEXT.get(quest_pressure, MAIN_QUEST_PRESSURE_CONTEXT["soft"]),
+        ]
+    )
     system_prompt = (
         OPENAI_SYSTEM_PROMPT
         if ai_provider.get_provider() == "gpt"

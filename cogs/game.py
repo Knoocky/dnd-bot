@@ -39,6 +39,29 @@ SETUP_HP_GAIN_MODE_CHOICES = {
     "choose": "choose_each_level",
     "choice": "choose_each_level",
 }
+MAIN_QUEST_PRESSURE_CHOICES = {
+    "редко": "rare",
+    "редкий": "rare",
+    "rare": "rare",
+    "мягко": "soft",
+    "мягкий": "soft",
+    "soft": "soft",
+    "жестко": "hard",
+    "жёстко": "hard",
+    "жесткий": "hard",
+    "жёсткий": "hard",
+    "hard": "hard",
+}
+MAIN_QUEST_PRESSURE_LABELS = {
+    "rare": "редко",
+    "soft": "мягко",
+    "hard": "жёстко",
+}
+MAIN_QUEST_PRESSURE_DESCRIPTIONS = {
+    "rare": "побочные отклонения обычно допустимы, а ощутимые последствия приходят только после долгого игнора главной линии.",
+    "soft": "почти каждое заметное отклонение имеет цену по времени, ресурсу или позиции, но не ломает сюжет сразу.",
+    "hard": "главная линия давит сильно: враги двигаются быстрее, окна возможностей закрываются, а промедление дорого стоит.",
+}
 INTRO_SETUP_STEPS = [
     {
         "status": "awaiting_intro_genre",
@@ -272,6 +295,42 @@ class GameCog(commands.Cog):
             " Изменение применяется к новым раундам."
         )
 
+    @commands.command(name="давление_сюжета", aliases=["дс"])
+    async def set_story_pressure(self, ctx, *, mode: str | None = None):
+        campaign = db.get_active_campaign(str(ctx.channel.id))
+        if not campaign:
+            await ctx.send("❌ Нет активной кампании.")
+            return
+
+        current_mode = campaign.get("main_quest_pressure") or "soft"
+        if mode is None:
+            await ctx.send(
+                f"🧭 Давление главного сюжета для кампании **{campaign['title']}**: "
+                f"**{MAIN_QUEST_PRESSURE_LABELS.get(current_mode, 'мягко')}**.\n"
+                f"{MAIN_QUEST_PRESSURE_DESCRIPTIONS.get(current_mode, MAIN_QUEST_PRESSURE_DESCRIPTIONS['soft'])}"
+            )
+            return
+
+        if not self._can_configure_campaign(ctx.author, ctx.channel):
+            await ctx.send(
+                "❌ Менять давление сюжета может только модератор канала или владелец настройки кампании."
+            )
+            return
+
+        normalized = MAIN_QUEST_PRESSURE_CHOICES.get(
+            re.sub(r"\s+", "", mode.strip().lower()).replace("ё", "е")
+        )
+        if normalized is None:
+            await ctx.send("❌ Используй один из режимов: `редко`, `мягко`, `жестко`.")
+            return
+
+        campaign = db.set_campaign_main_quest_pressure(campaign["id"], normalized)
+        await ctx.send(
+            f"✅ Давление главного сюжета для кампании **{campaign['title']}** установлено на "
+            f"**{MAIN_QUEST_PRESSURE_LABELS[normalized]}**.\n"
+            f"{MAIN_QUEST_PRESSURE_DESCRIPTIONS[normalized]}"
+        )
+
     # Actions
 
     @commands.command(name="д", aliases=["действие"])
@@ -285,7 +344,40 @@ class GameCog(commands.Cog):
 
         active_round = db.get_active_scene_round(campaign["id"])
         if active_round:
-            await self._explain_round_restriction(ctx, campaign, active_round)
+            pending = db.get_open_pending_roll_request(campaign["id"], str(ctx.author.id))
+            if pending and pending.get("round_id") == active_round["id"]:
+                await ctx.send(
+                    "🎲 На твой ход уже запрошен бросок. Пришли итог числом через `!бросок 17` "
+                    "или ответь реплаем с пометкой вроде `(бросок 17)`."
+                )
+                return
+
+            target = db.get_scene_round_target(active_round["id"], str(ctx.author.id))
+            if not target:
+                await ctx.send("❌ Твой персонаж не участвует в текущем раунде выбора.")
+                return
+            if target["status"] == "out_of_scene":
+                await ctx.send(
+                    f"🧭 **{target['character_name_snapshot']}** сейчас вне этой сцены, "
+                    "поэтому действие не влияет на текущий эпизод."
+                )
+                return
+
+            char_name, parsed = self._submit_round_response(
+                campaign,
+                active_round,
+                target,
+                str(ctx.author.id),
+                str(ctx.message.id),
+                text,
+            )
+            if parsed["response_kind"] == "option":
+                await ctx.send(
+                    f"✅ Ход для **{char_name}** принят как вариант **{parsed['selected_option']}**."
+                )
+            else:
+                await ctx.send(f"✅ Ход для **{char_name}** принят.")
+            await self._maybe_resolve_if_complete(active_round["id"], ctx.channel)
             return
 
         db.resume_campaign_auto_wait(campaign["id"])
@@ -553,6 +645,7 @@ class GameCog(commands.Cog):
 
     @commands.command(name="помощь", aliases=["п", "помощь_днд", "команды", "х"])
     async def dnd_help(self, ctx):
+        # Keep this help text in sync with public bot commands and aliases.
         embed = discord.Embed(
             title="📚 Команды D&D бота",
             description="Можно использовать префикс `!` или упоминание бота: `@бот команда`.",
@@ -564,6 +657,7 @@ class GameCog(commands.Cog):
                 "`!новая_кампания [название]` / `!нк` / `!старт` - начать кампанию, выбрать режим бросков и режим прироста HP\n"
                 "`!начать_игру` / `!ни` - запустить вступление\n"
                 "`!таймер [минуты]` / `!тм` - показать или изменить таймер на ход для новых раундов\n"
+                "`!давление_сюжета [редко|мягко|жестко]` / `!дс` - показать или изменить, как сильно мир давит главным квестом\n"
                 "`!завершить_кампанию` / `!зк` - завершить кампанию\n"
                 "`!история` / `!ис` / `!лор` - резюме приключения\n"
                 "`!игроки` / `!иг` / `!партия` - состав партии"
@@ -573,7 +667,7 @@ class GameCog(commands.Cog):
         embed.add_field(
             name="🧝 Персонаж",
             value=(
-                "`!создать_персонажа` / `!сп` / `!нп` - начать мастер создания: ручной, случайный AI или AI по концепции\n"
+                "`!создать_персонажа` / `!новый_перс` / `!сп` / `!нп` - начать мастер создания: ручной, случайный AI или AI по концепции\n"
                 "`!раса <название>` / `!р` - выбрать или изменить расу\n"
                 "`!подраса <название>` / `!пр` - выбрать или изменить подрасу, если она есть\n"
                 "`!класс <название>` / `!к` / `!кл` - выбрать или изменить класс\n"
@@ -594,7 +688,7 @@ class GameCog(commands.Cog):
         embed.add_field(
             name="⚔️ Игра",
             value=(
-                "`!д <текст>` / `!действие` - совершить действие вне активного окна выбора\n"
+                "`!д <текст|номер>` / `!действие` - совершить своё действие или выбрать вариант по номеру; работает и в открытом раунде выбора\n"
                 "`!бросок [кубик/итог]` / `!бр` / `!кубик` - в auto-режиме вернёт шутливый отказ, в manual-режиме примет `d20/д20/к20`, `2d6/2д6/2к6` или итог броска по запросу бота\n"
                 "`!статус_хода` / `!сх` - статус текущего раунда\n"
                 "`!пропустить` / `!пх` - пропустить свой ход\n"
@@ -610,7 +704,7 @@ class GameCog(commands.Cog):
                 "`!взять <предмет>` / `!вз` / `!добавить_предмет` - добавить предмет\n"
                 "`!выбросить <предмет>` / `!вб` / `!убрать` - выбросить предмет\n"
                 "`!золото` / `!зл` / `!монеты` - показать или изменить золото\n"
-                "`!помощь` / `!п` / `!команды` / `!х` - показать эту справку"
+                "`!помощь` / `!помощь_днд` / `!п` / `!команды` / `!х` - показать эту справку"
             ),
             inline=False,
         )
@@ -893,16 +987,13 @@ class GameCog(commands.Cog):
         await self._publish_master_response(channel, campaign["id"], visible_text or response)
 
     async def _handle_round_reply(self, message, campaign: dict, active_round: dict, target: dict, content: str):
-        user_id = str(message.author.id)
-        parsed = self._parse_round_reply(content, active_round["options"])
-        db.cancel_open_pending_roll_requests(campaign["id"], user_id)
-        db.upsert_scene_round_response(
-            active_round["id"],
-            user_id,
+        char_name, _ = self._submit_round_response(
+            campaign,
+            active_round,
+            target,
+            str(message.author.id),
             str(message.id),
-            parsed["response_kind"],
-            parsed["action_text"],
-            selected_option=parsed["selected_option"],
+            content,
         )
         await message.reply(f"✅ Ход для **{char_name}** принят.", mention_author=False)
         await self._maybe_resolve_if_complete(active_round["id"], message.channel)
@@ -1303,7 +1394,7 @@ class GameCog(commands.Cog):
         if target and target["status"] in {"expected", "answered"}:
             await ctx.send(
                 "⏳ Сейчас открыт общий раунд выбора. Ответь **реплаем на сообщение бота с вариантами** "
-                "числом `1-5` или своим текстом, чтобы твой ход попал в общий резолв."
+                "или используй `!д <номер>` / `!д <своё действие>`, чтобы твой ход попал в общий резолв."
             )
             return
 
@@ -1422,6 +1513,28 @@ class GameCog(commands.Cog):
             "response_kind": "free_text",
             "action_text": stripped,
         }
+
+    def _submit_round_response(
+        self,
+        campaign: dict,
+        active_round: dict,
+        target: dict,
+        user_id: str,
+        source_message_id: str,
+        content: str,
+    ) -> tuple[str, dict]:
+        char_name = target.get("character_name_snapshot") or user_id
+        parsed = self._parse_round_reply(content, active_round["options"])
+        db.cancel_open_pending_roll_requests(campaign["id"], user_id)
+        db.upsert_scene_round_response(
+            active_round["id"],
+            user_id,
+            source_message_id,
+            parsed["response_kind"],
+            parsed["action_text"],
+            selected_option=parsed["selected_option"],
+        )
+        return char_name, parsed
 
     def _extract_inline_roll_total(self, text: str) -> int | None:
         match = INLINE_ROLL_RE.search(text)
