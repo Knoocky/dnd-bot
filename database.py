@@ -10,6 +10,7 @@ CAMPAIGN_DEFAULTS = {
     "hp_gain_mode": None,
     "scene_round_timeout_minutes": 5,
     "main_quest_pressure": "soft",
+    "campaign_mode": "generated",
 }
 
 CHARACTER_JSON_FIELDS = {
@@ -73,6 +74,10 @@ def _campaign_from_row(row):
         campaign.get("main_quest_pressure")
         or CAMPAIGN_DEFAULTS["main_quest_pressure"]
     )
+    campaign["campaign_mode"] = campaign.get("campaign_mode") or CAMPAIGN_DEFAULTS["campaign_mode"]
+    campaign["adventure_slug"] = campaign.get("adventure_slug") or None
+    campaign["adventure_title"] = campaign.get("adventure_title") or None
+    campaign["adventure_gm_brief"] = campaign.get("adventure_gm_brief") or None
     return campaign
 
 
@@ -123,6 +128,14 @@ def _ensure_campaign_columns(conn):
         conn.execute("ALTER TABLE campaigns ADD COLUMN scene_round_timeout_minutes INTEGER DEFAULT 5")
     if "main_quest_pressure" not in existing_columns:
         conn.execute("ALTER TABLE campaigns ADD COLUMN main_quest_pressure TEXT DEFAULT 'soft'")
+    if "campaign_mode" not in existing_columns:
+        conn.execute("ALTER TABLE campaigns ADD COLUMN campaign_mode TEXT DEFAULT 'generated'")
+    if "adventure_slug" not in existing_columns:
+        conn.execute("ALTER TABLE campaigns ADD COLUMN adventure_slug TEXT")
+    if "adventure_title" not in existing_columns:
+        conn.execute("ALTER TABLE campaigns ADD COLUMN adventure_title TEXT")
+    if "adventure_gm_brief" not in existing_columns:
+        conn.execute("ALTER TABLE campaigns ADD COLUMN adventure_gm_brief TEXT")
 
 
 def _ensure_character_columns(conn):
@@ -160,6 +173,10 @@ def init_db():
             intro_answers_json TEXT DEFAULT '{}',
             scene_round_timeout_minutes INTEGER DEFAULT 5,
             main_quest_pressure TEXT DEFAULT 'soft',
+            campaign_mode TEXT DEFAULT 'generated',
+            adventure_slug TEXT,
+            adventure_title TEXT,
+            adventure_gm_brief TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -341,11 +358,22 @@ def create_campaign(
             setup_status,
             setup_owner_user_id,
             intro_status,
-            intro_answers_json
+            intro_answers_json,
+            campaign_mode
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (guild_id, channel_id, title, None, "awaiting_roll_mode", setup_owner_user_id, "not_started", "{}"),
+        (
+            guild_id,
+            channel_id,
+            title,
+            None,
+            "awaiting_campaign_mode",
+            setup_owner_user_id,
+            "not_started",
+            "{}",
+            CAMPAIGN_DEFAULTS["campaign_mode"],
+        ),
     )
     campaign_id = c.lastrowid
     conn.commit()
@@ -388,7 +416,60 @@ def set_campaign_hp_gain_mode(campaign_id: int, hp_gain_mode: str):
     conn = get_connection()
     conn.execute(
         "UPDATE campaigns SET hp_gain_mode = ?, setup_status = ? WHERE id = ?",
-        (hp_gain_mode, "ready", campaign_id),
+        (hp_gain_mode, "awaiting_campaign_title", campaign_id),
+    )
+    conn.commit()
+    conn.close()
+    return get_campaign(campaign_id)
+
+
+def set_campaign_mode(campaign_id: int, campaign_mode: str):
+    next_status = "awaiting_adventure_choice" if campaign_mode in {"preset", "preset_based"} else "awaiting_roll_mode"
+    conn = get_connection()
+    conn.execute(
+        """
+        UPDATE campaigns
+        SET campaign_mode = ?, setup_status = ?, adventure_slug = NULL, adventure_title = NULL, adventure_gm_brief = NULL
+        WHERE id = ?
+        """,
+        (campaign_mode, next_status, campaign_id),
+    )
+    conn.commit()
+    conn.close()
+    return get_campaign(campaign_id)
+
+
+def set_campaign_adventure(campaign_id: int, adventure_slug: str, adventure_title: str):
+    conn = get_connection()
+    conn.execute(
+        """
+        UPDATE campaigns
+        SET adventure_slug = ?, adventure_title = ?, adventure_gm_brief = NULL, setup_status = ?
+        WHERE id = ?
+        """,
+        (adventure_slug, adventure_title, "awaiting_roll_mode", campaign_id),
+    )
+    conn.commit()
+    conn.close()
+    return get_campaign(campaign_id)
+
+
+def set_campaign_title(campaign_id: int, title: str):
+    conn = get_connection()
+    conn.execute(
+        "UPDATE campaigns SET title = ?, setup_status = ? WHERE id = ?",
+        (title, "ready", campaign_id),
+    )
+    conn.commit()
+    conn.close()
+    return get_campaign(campaign_id)
+
+
+def set_campaign_adventure_gm_brief(campaign_id: int, adventure_gm_brief: str | None):
+    conn = get_connection()
+    conn.execute(
+        "UPDATE campaigns SET adventure_gm_brief = ? WHERE id = ?",
+        (adventure_gm_brief, campaign_id),
     )
     conn.commit()
     conn.close()

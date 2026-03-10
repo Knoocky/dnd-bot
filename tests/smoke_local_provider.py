@@ -1,4 +1,4 @@
-import os
+﻿import os
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -27,11 +27,25 @@ def _stream_event(content):
 
 
 def main():
-    request_kwargs = ai_provider._build_local_request_kwargs(
-        "system here",
-        [{"role": "user", "content": "hello"}],
-        123,
-    )
+    previous_local_model = os.environ.get("LLAMA_CPP_MODEL")
+    previous_cached_local_model = ai_provider._local_model_name
+    try:
+        os.environ["LLAMA_CPP_MODEL"] = "test-local-model"
+        ai_provider._local_model_name = None
+        request_kwargs = ai_provider._build_local_request_kwargs(
+            "system here",
+            [{"role": "user", "content": "hello"}],
+            123,
+        )
+    finally:
+        ai_provider._local_model_name = previous_cached_local_model
+        if previous_local_model is None:
+            os.environ.pop("LLAMA_CPP_MODEL", None)
+        else:
+            os.environ["LLAMA_CPP_MODEL"] = previous_local_model
+
+    if request_kwargs["model"] != "test-local-model":
+        raise AssertionError("local request kwargs should respect LLAMA_CPP_MODEL without autodetect")
     if request_kwargs.get("extra_body", {}).get("cache_prompt") is not True:
         raise AssertionError("local request kwargs should enable cache_prompt via extra_body")
     if request_kwargs["messages"][0] != {"role": "system", "content": "system here"}:

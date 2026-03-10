@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 import os
 from collections.abc import Iterator
 
@@ -411,6 +411,24 @@ def _build_local_chat_messages(system_prompt: str, messages: list) -> list[dict]
     return local_messages
 
 
+def _build_chat_completion_messages(system_blocks: list[str], messages: list) -> list[dict]:
+    chat_messages = []
+    for block in system_blocks:
+        content = str(block or "").strip()
+        if not content:
+            continue
+        chat_messages.append({"role": "system", "content": content})
+
+    for message in messages:
+        chat_messages.append(
+            {
+                "role": message.get("role", "user"),
+                "content": message.get("content", ""),
+            }
+        )
+    return chat_messages
+
+
 def _build_local_request_kwargs(system_prompt: str, messages: list, max_tokens: int) -> dict:
     return {
         "model": get_model_name(),
@@ -418,6 +436,31 @@ def _build_local_request_kwargs(system_prompt: str, messages: list, max_tokens: 
         "max_tokens": max_tokens,
         "extra_body": {"cache_prompt": True},
     }
+
+
+def _build_local_bootstrap_request_kwargs(system_blocks: list[str], messages: list, max_tokens: int) -> dict:
+    return {
+        "model": get_model_name(),
+        "messages": _build_chat_completion_messages(system_blocks, messages),
+        "max_tokens": max_tokens,
+        "extra_body": {"cache_prompt": True},
+    }
+
+
+def _build_openai_chat_request_kwargs(
+    system_blocks: list[str],
+    messages: list,
+    max_tokens: int,
+    openai_options: dict | None,
+) -> dict:
+    request_kwargs = {
+        "model": get_model_name(),
+        "messages": _build_chat_completion_messages(system_blocks, messages),
+        "max_completion_tokens": max_tokens,
+    }
+    if openai_options:
+        request_kwargs.update(openai_options)
+    return request_kwargs
 
 
 def _extract_local_stream_delta(event) -> str:
@@ -622,28 +665,152 @@ def _stream_local_api(system_prompt: str, messages: list, max_tokens: int = 1000
             request_kwargs["model"],
         )
         if not saw_text:
-            raise RuntimeError("Р›РѕРєР°Р»СЊРЅР°СЏ РјРѕРґРµР»СЊ llama.cpp РІРµСЂРЅСѓР»Р° РѕС‚РІРµС‚ Р±РµР· С‚РµРєСЃС‚РѕРІРѕРіРѕ СЃРѕРѕР±С‰РµРЅРёСЏ.")
+            raise RuntimeError("Локальная модель llama.cpp вернула поток без текстового сообщения.")
     except openai.AuthenticationError:
-        raise RuntimeError("рџ”‘ **Р›РѕРєР°Р»СЊРЅС‹Р№ СЃРµСЂРІРµСЂ llama.cpp РѕС‚РєР»РѕРЅРёР» РєР»СЋС‡.** РџСЂРѕРІРµСЂСЊ `LLAMA_CPP_API_KEY`.") from None
+        raise RuntimeError("🔑 **Локальный сервер llama.cpp отклонил ключ.** Проверь `LLAMA_CPP_API_KEY`.") from None
     except openai.APIStatusError as error:
         details = _openai_status_error_details(error)
         if error.status_code == 503 and "loading model" in details.lower():
-            raise RuntimeError("вЏі **Р›РѕРєР°Р»СЊРЅР°СЏ РјРѕРґРµР»СЊ llama.cpp РµС‰С‘ Р·Р°РіСЂСѓР¶Р°РµС‚СЃСЏ.** РџРѕРґРѕР¶РґРё РЅРµРјРЅРѕРіРѕ Рё РїРѕРїСЂРѕР±СѓР№ СЃРЅРѕРІР°.") from None
+            raise RuntimeError("⏳ **Локальная модель llama.cpp ещё загружается.** Подожди немного и попробуй снова.") from None
         logger.warning(
             "Local llama.cpp stream API status error. status=%s request_id=%s details=%s",
             error.status_code,
             _exception_request_id(error) or "unknown",
             details,
         )
-        raise RuntimeError(f"вљ пёЏ **РћС€РёР±РєР° Р»РѕРєР°Р»СЊРЅРѕРіРѕ СЃРµСЂРІРµСЂР° llama.cpp ({error.status_code})**: {details}") from None
+        raise RuntimeError(f"⚠️ **Ошибка локального сервера llama.cpp ({error.status_code})**: {details}") from None
     except (openai.APIConnectionError, openai.APITimeoutError):
         logger.warning("Local llama.cpp stream connection or timeout error. base_url=%s", base_url)
-        raise RuntimeError(f"рџЊђ **РќРµС‚ СЃРѕРµРґРёРЅРµРЅРёСЏ СЃ Р»РѕРєР°Р»СЊРЅРѕР№ РјРѕРґРµР»СЊСЋ llama.cpp.** РџСЂРѕРІРµСЂСЊ СЃРµСЂРІРµСЂ РЅР° `{base_url}`.") from None
+        raise RuntimeError(f"🌐 **Нет соединения с локальной моделью llama.cpp.** Проверь сервер на `{base_url}`.") from None
     except RuntimeError:
         raise
     except Exception as error:
         logger.exception("Unexpected local llama.cpp stream SDK error")
-        raise RuntimeError("вљ пёЏ **РќРµРѕР¶РёРґР°РЅРЅР°СЏ РѕС€РёР±РєР° Р»РѕРєР°Р»СЊРЅРѕР№ РјРѕРґРµР»Рё llama.cpp.** РџРѕРїСЂРѕР±СѓР№ РµС‰С‘ СЂР°Р· С‡СѓС‚СЊ РїРѕР·Р¶Рµ.") from error
+        raise RuntimeError("⚠️ **Неожиданная ошибка локальной модели llama.cpp.** Попробуй ещё раз чуть позже.") from error
+
+
+def _call_local_bootstrap_api(system_blocks: list[str], messages: list, max_tokens: int = 1000) -> str:
+    base_url = _get_local_base_url()
+    request_kwargs = _build_local_bootstrap_request_kwargs(system_blocks, messages, max_tokens)
+
+    try:
+        logger.debug(
+            "Local llama.cpp bootstrap request started. base_url=%s model=%s messages=%s max_tokens=%s",
+            base_url,
+            request_kwargs["model"],
+            len(request_kwargs["messages"]),
+            max_tokens,
+        )
+        response = _get_local_openai_client().chat.completions.create(**request_kwargs)
+        logger.debug(
+            "Local llama.cpp bootstrap request completed. base_url=%s model=%s request_id=%s",
+            base_url,
+            request_kwargs["model"],
+            _response_request_id(response) or "unknown",
+        )
+        return _extract_local_chat_output(response)
+    except openai.AuthenticationError:
+        raise RuntimeError("🔑 **Локальный сервер llama.cpp отклонил ключ.** Проверь `LLAMA_CPP_API_KEY`.") from None
+    except openai.APIStatusError as error:
+        details = _openai_status_error_details(error)
+        if error.status_code == 503 and "loading model" in details.lower():
+            raise RuntimeError("⏳ **Локальная модель llama.cpp ещё загружается.** Подожди немного и попробуй снова.") from None
+        logger.warning(
+            "Local llama.cpp bootstrap API status error. status=%s request_id=%s details=%s",
+            error.status_code,
+            _exception_request_id(error) or "unknown",
+            details,
+        )
+        raise RuntimeError(f"⚠️ **Ошибка локального сервера llama.cpp ({error.status_code})**: {details}") from None
+    except (openai.APIConnectionError, openai.APITimeoutError):
+        logger.warning("Local llama.cpp bootstrap connection or timeout error. base_url=%s", base_url)
+        raise RuntimeError(f"🌐 **Нет соединения с локальной моделью llama.cpp.** Проверь сервер на `{base_url}`.") from None
+    except RuntimeError:
+        raise
+    except Exception as error:
+        logger.exception("Unexpected local llama.cpp bootstrap SDK error")
+        raise RuntimeError("⚠️ **Неожиданная ошибка локальной модели llama.cpp.** Попробуй ещё раз чуть позже.") from error
+
+
+def _call_openai_bootstrap_api(
+    system_blocks: list[str],
+    messages: list,
+    max_tokens: int = 1000,
+    openai_options: dict | None = None,
+) -> str:
+    request_kwargs = _build_openai_chat_request_kwargs(system_blocks, messages, max_tokens, openai_options)
+
+    try:
+        logger.debug(
+            "OpenAI bootstrap request started. model=%s messages=%s max_tokens=%s",
+            get_model_name(),
+            len(request_kwargs["messages"]),
+            max_tokens,
+        )
+        response = _get_openai_client().chat.completions.create(**request_kwargs)
+        logger.debug(
+            "OpenAI bootstrap request completed. model=%s request_id=%s",
+            get_model_name(),
+            _response_request_id(response) or "unknown",
+        )
+        return _extract_local_chat_output(response)
+    except openai.RateLimitError:
+        raise RuntimeError("💸 **Лимиты GPT/OpenAI исчерпаны.** Проверь квоты и биллинг в OpenAI.") from None
+    except openai.AuthenticationError:
+        raise RuntimeError("🔑 **Неверный API-ключ OpenAI.** Проверь `OPENAI_API_KEY`.") from None
+    except openai.APIStatusError as error:
+        request_id = _exception_request_id(error) or "unknown"
+        details = _openai_status_error_details(error)
+        logger.warning(
+            "OpenAI bootstrap API status error. status=%s request_id=%s details=%s",
+            error.status_code,
+            request_id,
+            details,
+        )
+        raise RuntimeError(f"⚠️ **Ошибка OpenAI API ({error.status_code})**: {details}") from None
+    except (openai.APIConnectionError, openai.APITimeoutError):
+        logger.warning("OpenAI bootstrap connection or timeout error")
+        raise RuntimeError("🌐 **Нет соединения с OpenAI.** Проверь интернет-подключение.") from None
+    except RuntimeError:
+        raise
+    except Exception as error:
+        logger.exception("Unexpected OpenAI bootstrap SDK error")
+        raise RuntimeError("⚠️ **Неожиданная ошибка OpenAI API.** Попробуй ещё раз чуть позже.") from error
+
+
+def _call_claude_bootstrap_api(system_blocks: list[str], messages: list, max_tokens: int = 1000) -> str:
+    joined_system = "\n\n---\n\n".join(block.strip() for block in system_blocks if str(block or "").strip())
+    try:
+        logger.debug(
+            "Claude bootstrap request started. model=%s messages=%s max_tokens=%s",
+            get_model_name(),
+            len(messages),
+            max_tokens,
+        )
+        response = _get_anthropic_client().messages.create(
+            model=get_model_name(),
+            max_tokens=max_tokens,
+            system=joined_system,
+            messages=messages,
+        )
+        logger.debug("Claude bootstrap request completed. model=%s", get_model_name())
+        return response.content[0].text
+    except AnthropicRateLimitError:
+        raise RuntimeError("💸 **Лимиты Claude исчерпаны.** Проверь баланс и квоты в Anthropic.") from None
+    except AnthropicStatusError as error:
+        error_text = str(error).lower()
+        if error.status_code == 401:
+            raise RuntimeError("🔑 **Неверный API-ключ Claude.** Проверь `ANTHROPIC_API_KEY`.") from None
+        if error.status_code == 529:
+            raise RuntimeError("⏳ **Серверы Anthropic перегружены.** Попробуй ещё раз чуть позже.") from None
+        if error.status_code == 400 and "credit balance is too low" in error_text:
+            raise RuntimeError("💸 **У Anthropic закончился баланс.** Проверь биллинг в консоли.") from None
+        raise RuntimeError(f"⚠️ **Ошибка Claude API ({error.status_code})**: {error.message}") from None
+    except AnthropicConnectionError:
+        raise RuntimeError("🌐 **Нет соединения с Anthropic.** Проверь интернет-подключение.") from None
+    except Exception as error:
+        logger.exception("Unexpected Claude bootstrap SDK error")
+        raise RuntimeError("⚠️ **Неожиданная ошибка Claude API.** Попробуй ещё раз чуть позже.") from error
 
 
 def call_api(
@@ -666,6 +833,30 @@ def call_api(
             openai_options=openai_options,
         )
     raise RuntimeError(f"Провайдер {provider} не поддерживается.")
+
+
+def call_bootstrap_api(
+    system_blocks: list[str],
+    messages: list,
+    max_tokens: int = 1000,
+    openai_options: dict | None = None,
+) -> str:
+    validate_configuration()
+    provider = get_provider()
+    if provider == "local":
+        return _call_local_bootstrap_api(system_blocks, messages, max_tokens=max_tokens)
+    if provider == "claude":
+        return _call_claude_bootstrap_api(system_blocks, messages, max_tokens=max_tokens)
+    if provider == "gpt":
+        return _call_openai_bootstrap_api(
+            system_blocks,
+            messages,
+            max_tokens=max_tokens,
+            openai_options=openai_options,
+        )
+    raise RuntimeError(f"Провайдер {provider} не поддерживается.")
+
+
 def stream_api(system_prompt: str, messages: list, max_tokens: int = 1000) -> Iterator[str]:
     validate_configuration()
     provider = get_provider()

@@ -347,16 +347,16 @@ def get_feats() -> list[dict]:
     validated = []
     seen_keys = set()
     for index, feat in enumerate(feats, start=1):
-        normalized = _validate_common_entry(feat, context=f"??????? #{index} ? feats.json")
+        normalized = _validate_common_entry(feat, context=f"черта #{index} в feats.json")
         if normalized["key"] in seen_keys:
-            raise GameDataError(f"????????????? ???? ???? ? feats.json: {normalized['key']}")
+            raise GameDataError(f"Дублирующийся ключ черты в feats.json: {normalized['key']}")
         seen_keys.add(normalized["key"])
         normalized["category"] = str(feat.get("category", "general")).strip() or "general"
         try:
             normalized["minimum_level"] = int(feat.get("minimum_level", 4))
         except (TypeError, ValueError) as exc:
             raise GameDataError(
-                f"???? `minimum_level` ??? ???? {normalized['key']} ?????? ???? ??????."
+                f"Поле `minimum_level` для черты {normalized['key']} должно быть числом."
             ) from exc
         normalized["grants_asi"] = bool(feat.get("grants_asi", False))
         validated.append(normalized)

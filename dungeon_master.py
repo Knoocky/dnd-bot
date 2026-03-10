@@ -1,6 +1,7 @@
 ﻿import json
 import re
 
+import adventure_library
 import ai_provider_runtime as ai_provider
 import database as db
 import game_data
@@ -20,6 +21,9 @@ def _load_prompt(filename: str) -> str:
 
 CLAUDE_SYSTEM_PROMPT = _load_prompt("claude_system_prompt_ru_v_1.md")
 OPENAI_SYSTEM_PROMPT = _load_prompt("openai_system_prompt_ru_v_1.md")
+READY_ADVENTURE_SYSTEM_PROMPT = _load_prompt("ready_adventure_system_prompt_ru_v_1.md")
+READY_ADVENTURE_ADAPTATION_SYSTEM_PROMPT = _load_prompt("ready_adventure_adaptation_system_prompt_ru_v_1.md")
+ADVENTURE_GM_BRIEF_PROMPT = _load_prompt("adventure_gm_brief_prompt_ru_v_1.md")
 LOCAL_SYSTEM_PROMPT = """Ты — DnD-Bot, ведущий текстовой приключенческой игры.
 
 Главное:
@@ -196,6 +200,47 @@ MAIN_QUEST_PRESSURE_CONTEXT = {
     ),
 }
 
+PRESET_RUNTIME_CONTEXT = (
+    "РЕЖИМ КАМПАНИИ: готовое приключение. "
+    "Следуй скрытой служебной сводке приключения и не ломай опорную структуру модуля без веской причины."
+)
+PRESET_BASED_RUNTIME_CONTEXT = (
+    "РЕЖИМ КАМПАНИИ: свободная адаптация по мотивам готового приключения. "
+    "Сохраняй сильные стороны оригинала, но развивай уже новую кампанию."
+)
+
+
+def _adventure_mode_system_prompt(campaign_mode: str) -> str:
+    if campaign_mode == "preset_based":
+        return READY_ADVENTURE_ADAPTATION_SYSTEM_PROMPT
+    return READY_ADVENTURE_SYSTEM_PROMPT
+
+
+def _adventure_document_system_block(adventure: dict) -> str:
+    if _is_local_provider():
+        source_text = adventure_library.build_local_adventure_context(adventure)
+        return (
+            f"{source_text}\n\n"
+            "[ПРИМЕЧАНИЕ]\n"
+            "Это компактная сводка источника для локальной модели. "
+            "Держись структуры и тональности модуля, но не выдумывай детали, которых нет в сводке."
+        )
+
+    return (
+        "[ПОЛНЫЙ ТЕКСТ ГОТОВОГО ПРИКЛЮЧЕНИЯ]\n"
+        f"slug: {adventure['slug']}\n"
+        f"title: {adventure['title']}\n\n"
+        f"{adventure['content']}"
+    )
+
+
+def build_adventure_bootstrap_system_blocks(campaign_id: int, adventure: dict, campaign_mode: str) -> list[str]:
+    return [
+        *get_system_prompt_blocks(campaign_id, include_adventure_brief=False),
+        _adventure_mode_system_prompt(campaign_mode),
+        _adventure_document_system_block(adventure),
+    ]
+
 
 def _normalize_name(name: str) -> str:
     return re.sub(r"\s+", " ", name.strip().lower())
@@ -283,15 +328,28 @@ def extract_roll_request(text: str) -> dict:
 
 
 def _extract_numbered_options(text: str) -> list[str]:
+    cleaned = re.sub(r"\*\*", "", text or "")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    if not cleaned:
+        return []
+
+    matches = list(re.finditer(r"(?<!\w)(\d+)\s*[\.)]\s*", cleaned))
+    if not matches:
+        return []
+
     options = []
-    pattern = re.compile(
-        r"^\s*(?:[-*]\s*)?(?:\*\*)?(\d+)(?:\*\*)?\s*[\.)]\s*(?:\*\*)?(.+?)(?:\*\*)?\s*$",
-        flags=re.MULTILINE,
-    )
-    for match in pattern.finditer(text):
-        option = re.sub(r"\*\*", "", match.group(2)).strip()
+    for index, match in enumerate(matches):
+        number = int(match.group(1))
+        if number != index + 1:
+            continue
+
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(cleaned)
+        option = cleaned[start:end].strip(" -\n\t\r")
+        option = re.sub(r"\s+", " ", option).strip(" .")
         if option:
             options.append(option)
+
     return options[:5]
 
 
@@ -331,7 +389,52 @@ def _campaign_main_quest_pressure(campaign_id: int) -> str:
     return campaign.get("main_quest_pressure") or "soft"
 
 
-def get_system_prompt(campaign_id: int) -> str:
+def _campaign_mode(campaign_id: int) -> str:
+    campaign = db.get_campaign(campaign_id)
+    if not campaign:
+        return "generated"
+    return campaign.get("campaign_mode") or "generated"
+
+
+def _campaign_adventure_gm_brief(campaign_id: int) -> str | None:
+    campaign = db.get_campaign(campaign_id)
+    if not campaign:
+        return None
+    brief = str(campaign.get("adventure_gm_brief") or "").strip()
+    return brief or None
+
+
+def _campaign_adventure(campaign_id: int) -> dict | None:
+    campaign = db.get_campaign(campaign_id)
+    if not campaign:
+        return None
+    adventure_slug = str(campaign.get("adventure_slug") or "").strip()
+    if not adventure_slug:
+        return None
+    return adventure_library.get_adventure(adventure_slug)
+
+
+def _relevant_adventure_runtime_block(campaign_id: int, retrieval_query: str | None) -> str | None:
+    if not _is_local_provider():
+        return None
+    if _campaign_mode(campaign_id) not in {"preset", "preset_based"}:
+        return None
+    if not retrieval_query:
+        return None
+
+    adventure = _campaign_adventure(campaign_id)
+    if not adventure:
+        return None
+
+    block = adventure_library.build_relevant_local_adventure_context(adventure, retrieval_query)
+    return block or None
+
+
+def get_system_prompt_blocks(
+    campaign_id: int,
+    include_adventure_brief: bool = True,
+    retrieval_query: str | None = None,
+) -> list[str]:
     roll_mode = _campaign_roll_mode(campaign_id)
     quest_pressure = _campaign_main_quest_pressure(campaign_id)
     dynamic_context = "\n\n".join(
@@ -340,14 +443,33 @@ def get_system_prompt(campaign_id: int) -> str:
             MAIN_QUEST_PRESSURE_CONTEXT.get(quest_pressure, MAIN_QUEST_PRESSURE_CONTEXT["soft"]),
         ]
     )
-    system_prompt = (
+    base_system_prompt = (
         LOCAL_SYSTEM_PROMPT
         if _is_local_provider()
         else OPENAI_SYSTEM_PROMPT
         if ai_provider.get_provider() == "gpt"
         else CLAUDE_SYSTEM_PROMPT
     )
-    return f"{system_prompt}\n\n---\n\n{dynamic_context}"
+    system_blocks = [base_system_prompt, dynamic_context]
+
+    campaign_mode = _campaign_mode(campaign_id)
+    if campaign_mode == "preset":
+        system_blocks.append(PRESET_RUNTIME_CONTEXT)
+    elif campaign_mode == "preset_based":
+        system_blocks.append(PRESET_BASED_RUNTIME_CONTEXT)
+
+    if include_adventure_brief:
+        adventure_gm_brief = _campaign_adventure_gm_brief(campaign_id)
+        if adventure_gm_brief:
+            system_blocks.append(f"[СЛУЖЕБНАЯ СВОДКА ПРИКЛЮЧЕНИЯ]\n{adventure_gm_brief}")
+        relevant_source = _relevant_adventure_runtime_block(campaign_id, retrieval_query)
+        if relevant_source:
+            system_blocks.append(relevant_source)
+    return system_blocks
+
+
+def get_system_prompt(campaign_id: int, retrieval_query: str | None = None) -> str:
+    return "\n\n---\n\n".join(get_system_prompt_blocks(campaign_id, retrieval_query=retrieval_query))
 
 
 def is_role_break_attempt(text: str) -> bool:
@@ -595,7 +717,7 @@ def analyze_action_roll(campaign_id: int, user_id: str, username: str, action_te
     }
 
 
-async def start_campaign(campaign_id: int, title: str, intro_answers: dict | None = None) -> str:
+def _build_generated_start_user_message(campaign_id: int, title: str, intro_answers: dict | None = None) -> str:
     chars_ctx = compact_characters_context(campaign_id) if _is_local_provider() else characters_context(campaign_id)
     roll_mode = _campaign_roll_mode(campaign_id)
     intro_answers = intro_answers or {}
@@ -608,7 +730,7 @@ async def start_campaign(campaign_id: int, title: str, intro_answers: dict | Non
         f"Режим правил: {intro_answers.get('rules_mode', 'правила в основе, но с упрощением')}.",
         f"Сеттинг/мир: {intro_answers.get('setting', 'оригинальный фэнтезийный мир')}.",
     ]
-    user_msg = (
+    return (
         f"Начинается новая кампания под названием «{title}».\n"
         f"Режим бросков кампании: {roll_mode}.\n\n"
         f"{chars_ctx}\n\n"
@@ -619,17 +741,187 @@ async def start_campaign(campaign_id: int, title: str, intro_answers: dict | Non
         + "\n".join(f"- {line}" for line in intro_setup_lines)
     )
 
-    logger.info("Starting campaign intro generation. campaign_id=%s title=%s", campaign_id, title)
+
+def _build_adventure_start_user_message(campaign_id: int, title: str, adventure: dict, campaign_mode: str) -> str:
+    chars_ctx = compact_characters_context(campaign_id) if _is_local_provider() else characters_context(campaign_id)
+    roll_mode = _campaign_roll_mode(campaign_id)
+    mode_instruction = (
+        "Проведи выбранное приключение максимально близко к исходному модулю, сохраняя его структуру, секреты, напряжение и ключевые сцены."
+        if campaign_mode == "preset"
+        else "Открой новую кампанию по мотивам модуля: свободно адаптируй его темы, узлы, антагонистов и атмосферу под эту партию, не пересказывая модуль дословно."
+    )
+    return (
+        f"Запускается кампания «{title}».\n"
+        f"Выбранное приключение: {adventure['title']} ({adventure['slug']}).\n"
+        f"Режим бросков кампании: {roll_mode}.\n\n"
+        f"{chars_ctx}\n\n"
+        f"{mode_instruction}\n"
+        "Не задавай организационных вопросов и не пересказывай служебные инструкции.\n"
+        "Сразу открой первую игровую сцену, дай игрокам контекст старта и предложи конкретные действия."
+    )
+
+
+def _build_adventure_gm_brief_user_message(title: str, adventure: dict, campaign_mode: str) -> str:
+    mode_label = "faithful_preset" if campaign_mode == "preset" else "free_adaptation"
+    return (
+        f"{ADVENTURE_GM_BRIEF_PROMPT}\n\n"
+        f"Название кампании: {title}\n"
+        f"Режим: {mode_label}\n"
+        f"Источник: {adventure['title']} ({adventure['slug']})"
+    )
+
+
+def _store_campaign_opening(campaign_id: int, user_msg: str, answer: str):
+    db.add_message(campaign_id, "user", user_msg)
+    db.add_message(campaign_id, "assistant", answer)
+
+
+async def _prepare_adventure_gm_brief(campaign_id: int, title: str, campaign_mode: str, adventure: dict) -> str:
+    system_blocks = build_adventure_bootstrap_system_blocks(campaign_id, adventure, campaign_mode)
+    gm_brief_user_msg = _build_adventure_gm_brief_user_message(title, adventure, campaign_mode)
+
+    logger.info(
+        "Starting adventure bootstrap. campaign_id=%s title=%s mode=%s adventure=%s system_chars=%s local=%s",
+        campaign_id,
+        title,
+        campaign_mode,
+        adventure["slug"],
+        sum(len(block) for block in system_blocks),
+        _is_local_provider(),
+    )
+    gm_brief = await asyncio.to_thread(
+        ai_provider.call_bootstrap_api,
+        system_blocks,
+        [{"role": "user", "content": gm_brief_user_msg}],
+        1600,
+    )
+    db.set_campaign_adventure_gm_brief(campaign_id, gm_brief)
+    return gm_brief
+
+
+async def _start_generated_campaign(campaign_id: int, title: str, intro_answers: dict | None = None) -> str:
+    user_msg = _build_generated_start_user_message(campaign_id, title, intro_answers)
+    logger.info("Starting generated campaign intro. campaign_id=%s title=%s", campaign_id, title)
     answer = await asyncio.to_thread(
         ai_provider.call_api,
         get_system_prompt(campaign_id),
         [{"role": "user", "content": user_msg}],
         1800,
     )
-    db.add_message(campaign_id, "user", user_msg)
-    db.add_message(campaign_id, "assistant", answer)
-    logger.info("Campaign intro generated. campaign_id=%s", campaign_id)
+    _store_campaign_opening(campaign_id, user_msg, answer)
+    logger.info("Generated campaign intro completed. campaign_id=%s", campaign_id)
     return answer
+
+
+async def _start_adventure_campaign(campaign_id: int, title: str, campaign_mode: str, adventure: dict) -> str:
+    gm_brief = await _prepare_adventure_gm_brief(campaign_id, title, campaign_mode, adventure)
+    user_msg = _build_adventure_start_user_message(campaign_id, title, adventure, campaign_mode)
+    answer = await asyncio.to_thread(
+        ai_provider.call_api,
+        get_system_prompt(campaign_id),
+        [{"role": "user", "content": user_msg}],
+        1800,
+    )
+    _store_campaign_opening(campaign_id, user_msg, answer)
+    logger.info(
+        "Adventure bootstrap completed. campaign_id=%s mode=%s adventure=%s brief_chars=%s",
+        campaign_id,
+        campaign_mode,
+        adventure["slug"],
+        len(gm_brief),
+    )
+    return answer
+
+
+async def _stream_campaign_opening(
+    campaign_id: int,
+    user_msg: str,
+    operation: str,
+    log_context: dict,
+):
+    db.add_message(campaign_id, "user", user_msg)
+    messages = [{"role": "user", "content": user_msg}]
+    async for event in _stream_response_events(
+        campaign_id,
+        messages,
+        1800,
+        operation=operation,
+        log_context=log_context,
+    ):
+        if event["done"]:
+            db.add_message(campaign_id, "assistant", event["text"])
+        yield event
+
+
+async def start_campaign(campaign_id: int, title: str, intro_answers: dict | None = None) -> str:
+    campaign = db.get_campaign(campaign_id)
+    if not campaign:
+        raise RuntimeError("Активная кампания не найдена.")
+
+    campaign_mode = campaign.get("campaign_mode") or "generated"
+    if campaign_mode == "generated":
+        return await _start_generated_campaign(campaign_id, title, intro_answers)
+
+    adventure_slug = campaign.get("adventure_slug")
+    if not adventure_slug:
+        raise RuntimeError("Для этой кампании ещё не выбрано готовое приключение.")
+
+    adventure = adventure_library.get_adventure(adventure_slug)
+    if not adventure:
+        raise RuntimeError(
+            f"Не удалось найти файл приключения `{adventure_slug}.md` в каталоге data/adventures."
+        )
+
+    return await _start_adventure_campaign(campaign_id, title, campaign_mode, adventure)
+
+
+async def stream_campaign_start(campaign_id: int, title: str, intro_answers: dict | None = None):
+    campaign = db.get_campaign(campaign_id)
+    if not campaign:
+        raise RuntimeError("Активная кампания не найдена.")
+
+    campaign_mode = campaign.get("campaign_mode") or "generated"
+    if campaign_mode == "generated":
+        logger.info("Starting generated campaign intro stream. campaign_id=%s title=%s", campaign_id, title)
+        user_msg = _build_generated_start_user_message(campaign_id, title, intro_answers)
+        async for event in _stream_campaign_opening(
+            campaign_id,
+            user_msg,
+            operation="campaign_intro",
+            log_context={"mode": campaign_mode},
+        ):
+            if event["done"]:
+                logger.info("Generated campaign intro completed. campaign_id=%s", campaign_id)
+            yield event
+        return
+
+    adventure_slug = campaign.get("adventure_slug")
+    if not adventure_slug:
+        raise RuntimeError("Для этой кампании ещё не выбрано готовое приключение.")
+
+    adventure = adventure_library.get_adventure(adventure_slug)
+    if not adventure:
+        raise RuntimeError(
+            f"Не удалось найти файл приключения `{adventure_slug}.md` в каталоге data/adventures."
+        )
+
+    gm_brief = await _prepare_adventure_gm_brief(campaign_id, title, campaign_mode, adventure)
+    user_msg = _build_adventure_start_user_message(campaign_id, title, adventure, campaign_mode)
+    async for event in _stream_campaign_opening(
+        campaign_id,
+        user_msg,
+        operation="campaign_intro",
+        log_context={"mode": campaign_mode, "adventure": adventure["slug"]},
+    ):
+        if event["done"]:
+            logger.info(
+                "Adventure bootstrap completed. campaign_id=%s mode=%s adventure=%s brief_chars=%s",
+                campaign_id,
+                campaign_mode,
+                adventure["slug"],
+                len(gm_brief),
+            )
+        yield event
 
 
 def _action_user_content(campaign_id: int, user_id: str, username: str, action: str) -> str:
@@ -690,11 +982,12 @@ async def _stream_response_events(
     max_tokens: int,
     operation: str,
     log_context: dict,
+    retrieval_query: str | None = None,
 ):
     if not ai_provider.supports_streaming():
         answer = await asyncio.to_thread(
             ai_provider.call_api,
-            get_system_prompt(campaign_id),
+            get_system_prompt(campaign_id, retrieval_query=retrieval_query),
             messages,
             max_tokens,
         )
@@ -703,7 +996,7 @@ async def _stream_response_events(
 
     loop = asyncio.get_running_loop()
     queue = asyncio.Queue()
-    system_prompt = get_system_prompt(campaign_id)
+    system_prompt = get_system_prompt(campaign_id, retrieval_query=retrieval_query)
     started_at = time.perf_counter()
     context_items = " ".join(f"{key}={value}" for key, value in sorted(log_context.items()))
 
@@ -813,10 +1106,11 @@ async def process_action(campaign_id: int, user_id: str, username: str, action: 
     db.add_message(campaign_id, "user", user_content, user_id, username)
 
     messages = build_messages(campaign_id)
+    retrieval_query = f"{action}\n\n{recent_history_summary(campaign_id)}"
     logger.info("Processing DM action. campaign_id=%s user_id=%s", campaign_id, user_id)
     answer = await asyncio.to_thread(
         ai_provider.call_api,
-        get_system_prompt(campaign_id),
+        get_system_prompt(campaign_id, retrieval_query=retrieval_query),
         messages,
         2200,
     )
@@ -843,12 +1137,14 @@ async def stream_action(campaign_id: int, user_id: str, username: str, action: s
     db.add_message(campaign_id, "user", user_content, user_id, username)
 
     messages = build_messages(campaign_id)
+    retrieval_query = f"{action}\n\n{recent_history_summary(campaign_id)}"
     async for event in _stream_response_events(
         campaign_id,
         messages,
         2200,
         operation="action",
         log_context={"user_id": user_id},
+        retrieval_query=retrieval_query,
     ):
         if event["done"]:
             db.add_message(campaign_id, "assistant", event["text"])
@@ -872,6 +1168,7 @@ async def process_roll(
     db.add_message(campaign_id, "user", user_content, user_id, username)
 
     messages = build_messages(campaign_id)
+    retrieval_query = f"{user_content}\n\n{recent_history_summary(campaign_id)}"
     logger.info(
         "Processing roll narration. campaign_id=%s user_id=%s roll_type=%s",
         campaign_id,
@@ -880,7 +1177,7 @@ async def process_roll(
     )
     answer = await asyncio.to_thread(
         ai_provider.call_api,
-        get_system_prompt(campaign_id),
+        get_system_prompt(campaign_id, retrieval_query=retrieval_query),
         messages,
         1400,
     )
@@ -897,10 +1194,11 @@ async def process_scene_round(campaign_id: int, round_id: int) -> str:
     db.add_message(campaign_id, "user", summary_message)
 
     messages = build_messages(campaign_id)
+    retrieval_query = f"{summary_message}\n\n{recent_history_summary(campaign_id)}"
     logger.info("Processing scene round. campaign_id=%s round_id=%s", campaign_id, round_id)
     answer = await asyncio.to_thread(
         ai_provider.call_api,
-        get_system_prompt(campaign_id),
+        get_system_prompt(campaign_id, retrieval_query=retrieval_query),
         messages,
         2200,
     )
@@ -918,12 +1216,14 @@ async def stream_scene_round(campaign_id: int, round_id: int):
     db.add_message(campaign_id, "user", summary_message)
 
     messages = build_messages(campaign_id)
+    retrieval_query = f"{summary_message}\n\n{recent_history_summary(campaign_id)}"
     async for event in _stream_response_events(
         campaign_id,
         messages,
         2200,
         operation="scene_round",
         log_context={"round_id": round_id},
+        retrieval_query=retrieval_query,
     ):
         if event["done"]:
             db.add_message(campaign_id, "assistant", event["text"])
@@ -951,5 +1251,3 @@ async def get_summary(campaign_id: int) -> str:
     )
     logger.info("Campaign summary generated. campaign_id=%s", campaign_id)
     return summary
-
-
